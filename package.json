@@ -2,7 +2,7 @@
   "name": "mindit-bot",
   "version": "1.0.0",
   "description": "WhatsApp reminder bot for Mind It",
-  "main": "index.js",
+  "main": "api/index.js",
   "scripts": {
     "start": "node index.js"
   },
