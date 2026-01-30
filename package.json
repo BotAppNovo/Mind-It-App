@@ -1,7 +1,7 @@
 {
-  "name": "mind-it-app",
+  "name": "mindit-bot",
   "version": "1.0.0",
-  "description": "Bot de lembretes via WhatsApp",
+  "description": "WhatsApp reminder bot for Mind It",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
@@ -11,5 +11,8 @@
     "twilio": "^4.19.0",
     "@supabase/supabase-js": "^2.39.0",
     "node-cron": "^3.0.3"
+  },
+  "engines": {
+    "node": "18.x"
   }
 }
