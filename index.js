@@ -1,4 +1,4 @@
-// CONFIGURAÇÕES - AGORA USANDO VARIÁVEIS DE AMBIENTE (SEGURO!)
+// CONFIGURAÇÕES – AGORA USANDO VARIÁVEIS DE AMBIENTE (SEGURO!)
 const config = {
   twilio: {
     accountSid: process.env.TWILIO_ACCOUNT_SID,    // Variável de ambiente
