@@ -1,24 +1,39 @@
-// CONFIGURAÇÕES - VOCÊ VAI ALTERAR DEPOIS!
+// CONFIGURAÇÕES - AGORA USANDO VARIÁVEIS DE AMBIENTE (SEGURO!)
 const config = {
   twilio: {
-    accountSid: 'COLE_AQUI_SEU_ACCOUNT_SID',
-    authToken: 'COLE_AQUI_SEU_AUTH_TOKEN',
-    phoneNumber: 'whatsapp:+558185980592' // SEU NÚMERO!
+    accountSid: process.env.TWILIO_ACCOUNT_SID,    // Variável de ambiente
+    authToken: process.env.TWILIO_AUTH_TOKEN,      // Variável de ambiente
+    phoneNumber: 'whatsapp:+558185980592'          // SEU NÚMERO
   },
   supabase: {
-    url: 'COLE_AQUI_SUA_URL_SUPABASE',
-    key: 'COLE_AQUI_SUA_CHAVE_SUPABASE'
+    url: process.env.SUPABASE_URL,                 // Variável de ambiente
+    key: process.env.SUPABASE_KEY                  // Variável de ambiente
   }
 };
 
 // ============================================
-// NÃO ALTERE NADA ABAIXO SE NÃO SOUBER O QUE FAZ
+// NÃO ALTERE NADA ABAIXO
 // ============================================
 
 const express = require('express');
 const twilio = require('twilio');
 const { createClient } = require('@supabase/supabase-js');
 const cron = require('node-cron');
+
+// Verificar se todas as variáveis de ambiente estão configuradas
+const requiredEnvVars = [
+  'TWILIO_ACCOUNT_SID',
+  'TWILIO_AUTH_TOKEN',
+  'SUPABASE_URL',
+  'SUPABASE_KEY'
+];
+
+for (const envVar of requiredEnvVars) {
+  if (!process.env[envVar]) {
+    console.error(`❌ Variável de ambiente ausente: ${envVar}`);
+    process.exit(1);
+  }
+}
 
 const app = express();
 const client = twilio(config.twilio.accountSid, config.twilio.authToken);
@@ -56,44 +71,36 @@ app.post('/webhook', async (req, res) => {
 async function processMessage(telefone, mensagem) {
   mensagem = mensagem.toLowerCase().trim();
   
-  // SE FOR "OI", "OLÁ", "OLA"
   if (mensagem === 'oi' || mensagem === 'olá' || mensagem === 'ola') {
     return `👋 Olá! Sou seu assistente de memória externa!\n\n📝 Para criar lembrete:\n/novo [tarefa] # [hora]\n\nExemplo:\n/novo Comprar leite # 19:00\n\n📋 Ver lembretes: /lista\n🆘 Ajuda: /ajuda`;
   }
   
-  // SE FOR /NOVO
   if (mensagem.startsWith('/novo')) {
     return await criarLembrete(telefone, mensagem);
   }
   
-  // SE FOR /LISTA
   if (mensagem === '/lista') {
     return await listarLembretes(telefone);
   }
   
-  // SE FOR /AJUDA
   if (mensagem === '/ajuda') {
     return `ℹ️ COMANDOS DISPONÍVEIS:\n\n/novo [tarefa] # [hora] - Criar lembrete\n/lista - Ver todos lembretes\n/ajuda - Ver esta mensagem\n\nExemplos:\n/novo Ligar para mãe # 20:00\n/novo Pagar conta luz # 18:00`;
   }
   
-  // SE FOR CONFIRMAÇÃO
   if (mensagem.includes('✅') || mensagem.includes('confirmar')) {
     return `✅ Lembrete confirmado! Bem lembrado! 😊`;
   }
   
-  // SE FOR CANCELAR
   if (mensagem.includes('❌') || mensagem.includes('cancelar')) {
     return `❌ Lembrete cancelado.`;
   }
   
-  // MENSAGEM NÃO RECONHECIDA
   return `Não entendi. Digite /ajuda para ver os comandos.`;
 }
 
 // FUNÇÃO CRIAR LEMBRETE
 async function criarLembrete(telefone, mensagem) {
   try {
-    // Extrair dados: /novo Comprar leite # 19:00
     const partes = mensagem.split('#');
     if (partes.length < 2) {
       return 'Formato incorreto! Use: /novo [tarefa] # [hora]\nEx: /novo Comprar leite # 19:00';
@@ -102,12 +109,10 @@ async function criarLembrete(telefone, mensagem) {
     const texto = partes[0].replace('/novo', '').trim();
     const hora = partes[1].trim();
     
-    // Validar hora (HH:MM)
     if (!/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(hora)) {
       return 'Hora inválida! Use formato HH:MM (ex: 19:00)';
     }
     
-    // Salvar usuário
     const { data: usuario, error: userError } = await supabase
       .from('usuarios')
       .upsert({ 
@@ -121,7 +126,6 @@ async function criarLembrete(telefone, mensagem) {
     
     if (userError) throw userError;
     
-    // Calcular próxima execução
     const agora = new Date();
     const [horas, minutos] = hora.split(':');
     const proximaExecucao = new Date();
@@ -130,12 +134,10 @@ async function criarLembrete(telefone, mensagem) {
     proximaExecucao.setMinutes(parseInt(minutos));
     proximaExecucao.setSeconds(0);
     
-    // Se já passou da hora hoje, agenda para amanhã
     if (proximaExecucao < agora) {
       proximaExecucao.setDate(proximaExecucao.getDate() + 1);
     }
     
-    // Salvar lembrete
     const { error: lembreteError } = await supabase
       .from('lembretes')
       .insert({
@@ -197,20 +199,19 @@ async function listarLembretes(telefone) {
   }
 }
 
-// AGENDADOR DE LEMBRETES (roda a cada minuto)
+// AGENDADOR DE LEMBRETES
 cron.schedule('* * * * *', async () => {
   console.log('🔔 Verificando lembretes...');
   
   try {
     const agora = new Date().toISOString();
     
-    // Buscar lembretes devidos
     const { data: lembretes, error } = await supabase
       .from('lembretes')
       .select('*, usuarios(telefone)')
       .lte('proxima_execucao', agora)
       .eq('status', 'ativo')
-      .lt('tentativas', 3); // Máximo 3 tentativas
+      .lt('tentativas', 3);
     
     if (error) throw error;
     
@@ -219,14 +220,12 @@ cron.schedule('* * * * *', async () => {
     for (const lembrete of lembretes) {
       console.log(`📤 Enviando lembrete para ${lembrete.usuarios.telefone}`);
       
-      // Enviar mensagem
       await client.messages.create({
         from: config.twilio.phoneNumber,
         to: lembrete.usuarios.telefone,
         body: `🔔 LEMBRETE:\n\n${lembrete.texto}\n\nResponda com:\n✅ Confirmar\n⏰ Lembrar em 15 min\n❌ Cancelar`
       });
       
-      // Atualizar próxima execução
       let novaData = new Date(lembrete.proxima_execucao);
       
       if (lembrete.repeticao === 'diario') {
@@ -255,6 +254,7 @@ app.get('/', (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Bot rodando na porta ${PORT}`);
-  console.log(`🌐 Webhook: https://seu-site.vercel.app/webhook`);
-  console.log(`🔧 Número configurado: ${config.twilio.phoneNumber}`);
+  console.log(`📱 Número: ${config.twilio.phoneNumber}`);
+  console.log(`🗄️  Supabase conectado`);
+  console.log(`🔐 Variáveis de ambiente configuradas corretamente`);
 });
