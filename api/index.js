@@ -14,6 +14,14 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// CORS para permitir requisições do Twilio
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  next();
+});
+
 // ============================================
 // 2. CONFIGURAÇÕES (USANDO VARIÁVEIS DE AMBIENTE)
 // ============================================
@@ -22,7 +30,8 @@ const config = {
   twilio: {
     accountSid: process.env.TWILIO_ACCOUNT_SID,
     authToken: process.env.TWILIO_AUTH_TOKEN,
-    phoneNumber: 'whatsapp:+558185980592'
+    // MUDEI AQUI: Use o número do Twilio Sandbox
+    phoneNumber: 'whatsapp:+14155238886'  // Número do Twilio Sandbox
   },
   supabase: {
     url: process.env.SUPABASE_URL,
@@ -185,7 +194,40 @@ async function listarLembretes(telefone) {
 // 4. ROTAS PRINCIPAIS
 // ============================================
 
-// ROTA QUE RECEBE MENSAGENS DO WHATSAPP (WEBHOOK)
+// ============================================
+// ROTAS PARA WEBHOOK DO TWILIO
+// ============================================
+
+// 1. Rota GET para verificação do Twilio (NOVO!)
+app.get('/webhook', (req, res) => {
+  console.log('✅ Twilio verificando webhook (GET)');
+  
+  // Verificar se veio do Twilio (opcional)
+  if (req.query.validationToken) {
+    console.log('Token de validação:', req.query.validationToken);
+  }
+  
+  res.status(200).send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Webhook do Mind It Bot</title>
+      <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+        .success { color: #00b894; font-size: 24px; }
+      </style>
+    </head>
+    <body>
+      <div class="success">✅ Webhook configurado corretamente!</div>
+      <p>Mind It WhatsApp Bot está pronto para receber mensagens.</p>
+      <p><small>URL: https://mind-it-app.vercel.app/webhook</small></p>
+      <p><a href="/">Voltar para página inicial</a></p>
+    </body>
+    </html>
+  `);
+});
+
+// 2. Rota POST para receber mensagens
 app.post('/webhook', async (req, res) => {
   try {
     const message = req.body.Body;
@@ -208,6 +250,24 @@ app.post('/webhook', async (req, res) => {
     console.error('❌ Erro no webhook:', error);
     res.status(500).send('Error');
   }
+});
+
+// 3. Rota para status do webhook
+app.get('/webhook-status', (req, res) => {
+  res.json({
+    status: 'active',
+    service: 'mind-it-whatsapp-bot',
+    webhook_url: 'https://mind-it-app.vercel.app/webhook',
+    methods_supported: ['GET', 'POST'],
+    environment: process.env.NODE_ENV || 'production',
+    timestamp: new Date().toISOString(),
+    checks: {
+      twilio_account: !!process.env.TWILIO_ACCOUNT_SID,
+      twilio_auth: !!process.env.TWILIO_AUTH_TOKEN,
+      supabase_url: !!process.env.SUPABASE_URL,
+      supabase_key: !!process.env.SUPABASE_KEY
+    }
+  });
 });
 
 // ROTA RAIZ - PÁGINA DE STATUS
@@ -267,6 +327,14 @@ app.get('/', (req, res) => {
           border-radius: 8px;
           border-left: 5px solid #ffc107;
         }
+        .webhook-test {
+          text-align: left;
+          margin-top: 20px;
+          background: #d1ecf1;
+          padding: 15px;
+          border-radius: 8px;
+          border-left: 5px solid #0dcaf0;
+        }
         code {
           background: #2d3436;
           color: #00b894;
@@ -276,6 +344,18 @@ app.get('/', (req, res) => {
         }
         .check { color: #00b894; }
         .warning { color: #ff6b6b; }
+        .btn {
+          display: inline-block;
+          background: #667eea;
+          color: white;
+          padding: 10px 20px;
+          border-radius: 5px;
+          text-decoration: none;
+          margin: 5px;
+        }
+        .btn:hover {
+          background: #5a6fd8;
+        }
       </style>
     </head>
     <body>
@@ -294,17 +374,28 @@ app.get('/', (req, res) => {
           </ul>
         </div>
         
+        <div class="webhook-test">
+          <h3>🔗 Testar Webhook:</h3>
+          <p>
+            <a href="/webhook" class="btn" target="_blank">Testar GET /webhook</a>
+            <a href="/webhook-status" class="btn" target="_blank">Status do Webhook</a>
+            <a href="/health" class="btn" target="_blank">Saúde do Servidor</a>
+          </p>
+          <p><small>URL do webhook: <code>https://mind-it-app.vercel.app/webhook</code></small></p>
+        </div>
+        
         <div class="endpoints">
           <h3>📡 Endpoints Disponíveis:</h3>
           <ul>
             <li><strong>GET <code>/</code></strong> - Esta página de status</li>
             <li><strong>GET <code>/health</code></strong> - Status do servidor (JSON)</li>
-            <li><strong>POST <code>/webhook</code></strong> - Webhook do Twilio para WhatsApp</li>
+            <li><strong>GET <code>/webhook</code></strong> - Verificação do Twilio</li>
+            <li><strong>POST <code>/webhook</code></strong> - Receber mensagens WhatsApp</li>
+            <li><strong>GET <code>/webhook-status</code></strong> - Status do webhook</li>
           </ul>
           
           <h3 style="margin-top: 25px;">🔗 Links Úteis:</h3>
           <ul>
-            <li><a href="/health" target="_blank">Testar saúde do servidor</a></li>
             <li><a href="https://console.twilio.com" target="_blank">Painel do Twilio</a></li>
             <li><a href="https://supabase.com/dashboard" target="_blank">Painel do Supabase</a></li>
             <li><a href="https://github.com/BotAppNovo/Mind-It-App" target="_blank">Código no GitHub</a></li>
@@ -322,7 +413,7 @@ app.get('/', (req, res) => {
   `);
 });
 
-// ROTA DE SAÚDE PARA MONITORAMENTO
+// Rota de saúde para monitoramento
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'healthy',
@@ -402,6 +493,6 @@ module.exports = app;
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Bot rodando na porta ${PORT}`);
-  console.log(`📱 Número: ${config.twilio.phoneNumber}`);
+  console.log(`📱 Número do Twilio: ${config.twilio.phoneNumber}`);
 });
 */
