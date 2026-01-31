@@ -36,7 +36,6 @@ export default async function handler(req, res) {
       const changes = entry?.changes?.[0];
       const value = changes?.value;
       const message = value?.messages?.[0];
-      const phoneNumberId = value?.metadata?.phone_number_id;
       
       if (message) {
         const userNumber = message.from;
@@ -52,20 +51,9 @@ export default async function handler(req, res) {
         const resposta = await processarMensagem(userText);
         console.log(`🤖 Resposta: "${resposta}"`);
         
-        // 📤 ENVIAR RESPOSTA (se tiver access token)
-        if (process.env.META_ACCESS_TOKEN && phoneNumberId) {
-          await enviarRespostaWhatsApp(
-            phoneNumberId,
-            userNumber,
-            resposta,
-            process.env.META_ACCESS_TOKEN
-          );
-          console.log('✅ Resposta enviada via Meta API');
-        } else {
-          console.log('⚠️ Não enviou resposta (falta META_ACCESS_TOKEN ou phoneNumberId)');
-          console.log('Token disponível?', !!process.env.META_ACCESS_TOKEN);
-          console.log('Phone Number ID:', phoneNumberId);
-        }
+        // 📤 ENVIAR RESPOSTA via Meta API
+        await enviarRespostaWhatsApp(userNumber, resposta);
+        
       }
     } catch (error) {
       console.log('❌ Erro ao processar mensagem:', error);
@@ -81,7 +69,7 @@ export default async function handler(req, res) {
 async function processarMensagem(texto) {
   texto = texto.toLowerCase().trim();
   
-  if (texto === 'oi' || texto === 'olá' || texto === 'ola') {
+  if (texto === 'oi' || texto === 'olá' || texto === 'ola' || texto === '0i') {
     return `👋 Olá! Bem-vindo ao Mind It!\n\nSou seu assistente de memória externa. Digite /ajuda para ver comandos.`;
   }
   
@@ -101,9 +89,22 @@ async function processarMensagem(texto) {
 }
 
 // 📤 FUNÇÃO PARA ENVIAR RESPOSTA VIA META API
-async function enviarRespostaWhatsApp(phoneNumberId, userNumber, texto, accessToken) {
+async function enviarRespostaWhatsApp(userNumber, texto) {
   try {
+    // Usa variáveis de ambiente
+    const accessToken = process.env.META_ACCESS_TOKEN;
+    const phoneNumberId = process.env.META_PHONE_NUMBER_ID;
+    
+    if (!accessToken || !phoneNumberId) {
+      console.log('⚠️ Token ou Phone Number ID não configurados no Vercel');
+      console.log('Token:', accessToken ? '✅ Configurado' : '❌ Ausente');
+      console.log('Phone ID:', phoneNumberId ? '✅ Configurado' : '❌ Ausente');
+      return null;
+    }
+    
     const url = `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`;
+    
+    console.log(`📤 Enviando para ${userNumber}: "${texto}"`);
     
     const response = await fetch(url, {
       method: 'POST',
@@ -114,10 +115,7 @@ async function enviarRespostaWhatsApp(phoneNumberId, userNumber, texto, accessTo
       body: JSON.stringify({
         messaging_product: 'whatsapp',
         to: userNumber,
-        text: { body: texto },
-        context: {
-          message_id: '' // Opcional: ID da mensagem original
-        }
+        text: { body: texto }
       }),
     });
     
@@ -125,12 +123,14 @@ async function enviarRespostaWhatsApp(phoneNumberId, userNumber, texto, accessTo
     console.log('📤 Resposta da Meta API:', data);
     
     if (!response.ok) {
+      console.log('❌ Erro da Meta API:', data);
       throw new Error(`Erro API: ${JSON.stringify(data)}`);
     }
     
+    console.log('✅ Mensagem enviada com sucesso!');
     return data;
   } catch (error) {
     console.error('❌ Erro ao enviar resposta WhatsApp:', error);
-    throw error;
+    return null;
   }
 }
