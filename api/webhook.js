@@ -1,235 +1,304 @@
-// api/webhook.js - VERSÃO COM HELLO_WORLD PARA TESTE IMEDIATO
-export default async function handler(req, res) {
-  console.log('=== 🤖 MIND IT BOT - HELLO_WORLD TEST ===', new Date().toISOString());
-  console.log('📡 Método:', req.method);
+// api/webhook.js
+// Mind It Bot - WhatsApp Business API Webhook
+// MVP Wizard of Oz - Lembretes persistentes
 
-  // 🔐 VERIFICAÇÃO DO WEBHOOK (META)
+export default async function handler(req, res) {
+  console.log('\n=== 🤖 MIND IT BOT - WEBHOOK INICIADO ===', new Date().toISOString());
+  
+  // 🔐 VERIFICAÇÃO DO WEBHOOK (Meta requer durante configuração)
   if (req.method === 'GET') {
+    console.log('🔍 Recebida solicitação GET (verificação webhook)');
+    
     const mode = req.query['hub.mode'];
     const token = req.query['hub.verify_token'];
     const challenge = req.query['hub.challenge'];
     
-    const TOKEN_CORRETO = 'MindItBot2024';
+    console.log(`📋 Parâmetros GET: mode=${mode}, token=${token}, challenge=${challenge}`);
     
-    if (mode === 'subscribe' && token === TOKEN_CORRETO) {
-      console.log('✅ Webhook validado!');
+    if (mode === 'subscribe' && token === process.env.WEBHOOK_VERIFY_TOKEN) {
+      console.log('✅ Token de verificação VÁLIDO! Webhook verificado.');
       return res.status(200).send(challenge);
+    } else {
+      console.log('❌ Token de verificação INVÁLIDO!');
+      return res.status(403).send('Token de verificação inválido');
     }
-    
-    // Status para acesso direto
-    return res.status(200).json({
-      status: 'online',
-      app: 'Mind It Bot',
-      mode: 'hello_world_test_mode',
-      test_format: '[tarefa] as [hora]',
-      example: 'comprar leite as 18',
-      note: 'Usando template hello_world para testes imediatos'
-    });
   }
   
-  // 📩 MENSAGEM RECEBIDA DO WHATSAPP
+  // 📨 PROCESSAMENTO DE MENSAGENS RECEBIDAS
   if (req.method === 'POST') {
-    console.log('📩 Mensagem WhatsApp recebida!');
-    
-    // Resposta RÁPIDA para Meta (dentro de 20s)
-    res.status(200).send('EVENT_RECEIVED');
+    console.log('📨 Recebida solicitação POST (mensagem WhatsApp)');
     
     try {
       const body = req.body;
-      const entry = body.entry?.[0];
-      const changes = entry?.changes?.[0];
-      const value = changes?.value;
-      const message = value?.messages?.[0];
-      const phoneNumberId = value?.metadata?.phone_number_id;
+      console.log('📦 Body recebido:', JSON.stringify(body, null, 2));
       
-      if (message) {
-        const userNumber = message.from;
-        const userText = (message.text?.body || '').toLowerCase().trim();
-        const messageId = message.id;
-        
-        console.log('👤 Usuário:', userNumber);
-        console.log('💬 Mensagem:', userText);
-        console.log('🆔 ID:', messageId);
-        
-        // PROCESSAR MENSAGEM (MODO TESTE COM HELLO_WORLD)
-        await processarMensagemTeste(userNumber, userText, phoneNumberId);
-        
-      } else {
-        console.log('⚠️ Mensagem sem texto ou formato diferente');
+      // Verificar se é uma mensagem válida do WhatsApp
+      if (body.object !== 'whatsapp_business_account') {
+        console.log('⚠️ Objeto não é whatsapp_business_account');
+        return res.status(400).send('Objeto inválido');
       }
       
+      // Processar cada entrada (pode ter múltiplas em uma requisição)
+      for (const entry of body.entry || []) {
+        for (const change of entry.changes || []) {
+          if (change.field === 'messages') {
+            const value = change.value;
+            
+            // Extrair informações da mensagem
+            const message = value.messages?.[0];
+            if (!message) {
+              console.log('⚠️ Nenhuma mensagem encontrada no payload');
+              continue;
+            }
+            
+            const from = message.from; // Número do remetente
+            const messageType = message.type;
+            const messageId = message.id;
+            const timestamp = new Date(parseInt(value.metadata.timestamp) * 1000).toISOString();
+            
+            console.log('\n📩 MENSAGEM WHATSAPP RECEBIDA:');
+            console.log(`👤 Usuário: ${from}`);
+            console.log(`🆔 ID: ${messageId}`);
+            console.log(`⏰ Timestamp: ${timestamp}`);
+            console.log(`📝 Tipo: ${messageType}`);
+            
+            // Processar texto da mensagem
+            if (messageType === 'text') {
+              const messageText = message.text.body;
+              console.log(`💬 Texto: ${messageText}`);
+              
+              // Processar a mensagem
+              await processMessage(from, messageText);
+              
+            } else if (messageType === 'button') {
+              // Resposta de botão (ex: "feito", "adiar")
+              const buttonText = message.button.text;
+              console.log(`🔘 Botão: ${buttonText}`);
+              
+              // Processar resposta de botão
+              await processButtonResponse(from, buttonText);
+              
+            } else {
+              console.log(`⚠️ Tipo de mensagem não suportado: ${messageType}`);
+              // Responder com mensagem de ajuda
+              await sendWhatsAppMessage(from, 'hello_world');
+            }
+          }
+        }
+      }
+      
+      console.log('✅ Webhook processado com sucesso');
+      return res.status(200).send('EVENT_RECEIVED');
+      
     } catch (error) {
-      console.log('❌ Erro ao processar:', error.message);
+      console.error('❌ Erro no processamento do webhook:', error);
+      return res.status(500).send('Erro interno');
     }
-    
+  }
+  
+  // Método HTTP não suportado
+  console.log(`⚠️ Método não suportado: ${req.method}`);
+  return res.status(405).send('Método não permitido');
+}
+
+// 🔧 FUNÇÃO PRINCIPAL DE PROCESSAMENTO DE MENSAGENS
+async function processMessage(from, text) {
+  console.log(`\n⚙️ PROCESSANDO MENSAGEM: "${text}"`);
+  
+  // Converter para minúsculas para comparação
+  const lowerText = text.toLowerCase().trim();
+  
+  // COMANDOS ESPECIAIS
+  if (lowerText === 'oi' || lowerText === 'olá' || lowerText === 'ola') {
+    console.log('🎯 Comando: Saudação inicial');
+    await sendWhatsAppMessage(from, 'hello_world');
     return;
   }
   
-  // Outros métodos
-  res.status(405).json({ error: 'Method not allowed' });
-}
-
-// 🧠 PROCESSADOR DE TESTE (HELLO_WORLD APENAS)
-async function processarMensagemTeste(userNumber, userText, phoneNumberId) {
-  console.log('⚙️ Processando (modo teste):', userText);
+  if (lowerText === 'ajuda' || lowerText === 'help') {
+    console.log('🎯 Comando: Ajuda');
+    await sendWhatsAppMessage(from, 'hello_world');
+    return;
+  }
   
-  // EXTRAIR NOME DO NÚMERO (para personalização)
-  const userName = extrairNomeDoNumero(userNumber);
+  if (lowerText === 'lista' || lowerText === 'listar') {
+    console.log('🎯 Comando: Listar lembretes');
+    await sendWhatsAppMessage(from, 'hello_world');
+    return;
+  }
   
-  // SEMPRE responde com hello_world (PARA TESTE IMEDIATO)
-  console.log('🎯 [TESTE] Enviando template hello_world');
+  // CONFIRMAÇÕES (em minúsculas para capturar variações)
+  const confirmacoes = ['feito', 'feita', 'fez', 'pronto', 'pronta', 'concluído', 'concluida', 'concluído', 'ok', 'certo', 'já fiz'];
+  if (confirmacoes.includes(lowerText)) {
+    console.log('🎯 Comando: Confirmação de tarefa');
+    await sendWhatsAppMessage(from, 'hello_world');
+    return;
+  }
   
-  const resultado = await enviarTemplateWhatsApp(
-    userNumber, 
-    phoneNumberId, 
-    'hello_world', // ← TEMPLATE PRÉ-APROVADO
-    [
-      { type: 'text', text: userName }
-    ]
-  );
+  // 📝 PARSING DO FORMATO "[tarefa] as [hora]"
+  const regex = /(.+?)\s+as\s+(\d{1,2}(?:[:.]\d{2})?)\s*(?:h|hr|hrs)?/i;
+  const match = text.match(regex);
   
-  // Log adicional para debug
-  if (resultado) {
-    console.log('✅ Teste concluído: hello_world enviado/com tentativa');
+  if (match) {
+    const tarefa = match[1].trim();
+    const hora = match[2].trim();
+    
+    console.log(`🎯 Formato detectado: "${tarefa}" as "${hora}"`);
+    console.log(`📋 Tarefa: ${tarefa}`);
+    console.log(`⏰ Hora: ${hora}`);
+    
+    // Validar hora (formato simples)
+    const horaValida = validarHora(hora);
+    if (horaValida) {
+      console.log('✅ Hora válida formatada:', horaValida);
+      
+      // AQUI FUTURAMENTE: Salvar no banco de dados (Supabase)
+      // const reminderId = await saveReminder(from, tarefa, horaValida);
+      
+      // Por enquanto, apenas responder
+      await sendWhatsAppMessage(from, 'hello_world');
+      
+    } else {
+      console.log('❌ Hora inválida:', hora);
+      await sendWhatsAppMessage(from, 'hello_world');
+    }
+    
   } else {
-    console.log('⚠️ Teste: hello_world não enviado (verificar token/logs)');
+    console.log('❌ Formato não reconhecido');
+    
+    // Se não for comando nem formato correto, responder com ajuda
+    await sendWhatsAppMessage(from, 'hello_world');
   }
 }
 
-// 🔧 FUNÇÃO AUXILIAR: EXTRAIR NOME DO NÚMERO
-function extrairNomeDoNumero(numero) {
-  // Pega últimos 4 dígitos para personalização
-  const ultimosDigitos = numero.slice(-4);
-  return `Usuário${ultimosDigitos}`;
+// 🔘 PROCESSAR RESPOSTAS DE BOTÃO (para interações futuras)
+async function processButtonResponse(from, buttonText) {
+  console.log(`🔘 Processando resposta de botão: ${buttonText}`);
+  
+  // Por enquanto, responder com hello_world
+  await sendWhatsAppMessage(from, 'hello_world');
 }
 
-// 📤 FUNÇÃO PARA ENVIAR TEMPLATE (PRINCIPAL)
-async function enviarTemplateWhatsApp(destinatario, phoneNumberId, templateName, parameters = []) {
+// 🕒 VALIDAR E FORMATAR HORA
+function validarHora(horaString) {
   try {
-    const accessToken = process.env.META_ACCESS_TOKEN;
+    // Substituir ponto por dois pontos se necessário
+    let horaFormatada = horaString.replace('.', ':');
     
-    // SE NÃO TEM TOKEN, MOSTRA LOG DETALHADO MAS NÃO FALHA
-    if (!accessToken) {
-      console.log('❌ Token não configurado no Vercel');
-      console.log('💡 Configure META_ACCESS_TOKEN nas variáveis de ambiente');
-      console.log('📝 Valor esperado: Token que começa com EAAN...');
-      console.log('🔗 Como conseguir: WhatsApp → Configuration → Access Tokens → Generate Token');
-      console.log('📤 [SIMULAÇÃO] Template seria:', templateName);
-      console.log('📞 Para:', destinatario);
-      console.log('📝 Parâmetros:', parameters);
-      console.log('🚨 AÇÃO NECESSÁRIA: Adicionar token no Vercel → Settings → Environment Variables');
-      return false;
+    // Se não tiver minutos, adicionar :00
+    if (!horaFormatada.includes(':')) {
+      horaFormatada += ':00';
     }
     
-    // Se não tiver phoneNumberId, usa fallback
-    if (!phoneNumberId) {
-      phoneNumberId = process.env.META_PHONE_NUMBER_ID || '973121319218554';
-      console.log('📱 Usando Phone Number ID fallback:', phoneNumberId);
+    // Separar horas e minutos
+    const [horasStr, minutosStr] = horaFormatada.split(':');
+    let horas = parseInt(horasStr, 10);
+    const minutos = parseInt(minutosStr, 10) || 0;
+    
+    // Validar ranges
+    if (horas < 0 || horas > 23 || minutos < 0 || minutos > 59) {
+      return null;
     }
     
-    const url = `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`;
+    // Formatar para HH:MM
+    const horasFormatadas = horas.toString().padStart(2, '0');
+    const minutosFormatados = minutos.toString().padStart(2, '0');
     
-    console.log('🚀 ENVIANDO TEMPLATE REAL AGORA!');
-    console.log('🎯 Template:', templateName);
-    console.log('📞 Para:', destinatario);
-    console.log('🔗 URL:', url);
-    console.log('🔑 Token configurado?:', accessToken ? 'SIM (primeiros 10 chars): ' + accessToken.substring(0, 10) + '...' : 'NÃO');
+    return `${horasFormatadas}:${minutosFormatados}`;
     
-    // Construir payload do template
-    const payload = {
-      messaging_product: 'whatsapp',
-      to: destinatario,
-      type: 'template',
-      template: {
-        name: templateName,
-        language: {
-          code: 'en_US', // hello_world é em inglês
-          policy: 'deterministic'
-        }
-      }
-    };
-    
-    // Adicionar componentes se tiver parâmetros
-    if (parameters.length > 0) {
-      payload.template.components = [{
-        type: 'body',
-        parameters: parameters
-      }];
+  } catch (error) {
+    console.error('❌ Erro ao validar hora:', error);
+    return null;
+  }
+}
+
+// 📤 FUNÇÃO PARA ENVIAR MENSAGENS VIA WHATSAPP BUSINESS API
+async function sendWhatsAppMessage(to, templateName) {
+  console.log(`\n🚀 ENVIANDO MENSAGEM WHATSAPP`);
+  console.log(`📞 Para: ${to}`);
+  console.log(`🎯 Template: ${templateName}`);
+  
+  // Configurações da API
+  const accessToken = process.env.META_ACCESS_TOKEN;
+  const phoneNumberId = process.env.META_PHONE_NUMBER_ID;
+  
+  if (!accessToken || !phoneNumberId) {
+    console.error('❌ Variáveis de ambiente não configuradas!');
+    return { error: 'Configuração incompleta' };
+  }
+  
+  // URL da API
+  const url = `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`;
+  
+  // 🔥 PAYLOAD CORRIGIDO - SIMPLIFICADO IGUAL AO PAINEL META
+  const payload = {
+    messaging_product: 'whatsapp',
+    to: to,
+    type: 'template',
+    template: {
+      name: templateName,
+      language: { code: 'en_US' }  // APENAS ISSO! SEM components NEM policy
     }
-    
-    console.log('📦 Payload:', JSON.stringify(payload, null, 2));
-    
-    // TENTAR ENVIAR VIA API META (AGORA DE VERDADE!)
+  };
+  
+  console.log('📦 Payload simplificado:', JSON.stringify(payload, null, 2));
+  
+  try {
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(payload)
     });
     
-    const data = await response.json();
-    console.log('📤 RESPOSTA DA META:', JSON.stringify(data, null, 2));
+    const result = await response.json();
+    console.log('📤 Resposta completa da API:', JSON.stringify(result, null, 2));
     
-    if (response.ok) {
-      console.log(`✅✅✅ SUCESSO! TEMPLATE "${templateName}" ACEITO PELA META! ✅✅✅`);
-      console.log(`💌 Agora a Meta deve entregar ao usuário...`);
-      return true;
-    } else {
-      console.log('❌❌❌ ERRO DA META AO ACEITAR TEMPLATE ❌❌❌');
-      console.log('🔍 Mensagem do erro:', data.error?.message);
-      console.log('📝 Código do erro:', data.error?.code);
-      console.log('📌 Tipo do erro:', data.error?.type);
-      console.log('🆔 FB Trace ID:', data.error?.fbtrace_id);
+    if (result.error) {
+      console.error('❌ Erro na API:', result.error.message);
+      console.error('Código:', result.error.code, 'Tipo:', result.error.type);
       
-      // ANÁLISE DOS ERROS COMUNS
-      if (data.error?.code === 190) {
-        console.log('🚨 PROBLEMA: Token expirado ou inválido');
-        console.log('💡 SOLUÇÃO: Gerar novo token no painel da Meta');
-      } else if (data.error?.code === 100) {
-        console.log('🚨 PROBLEMA: Permissões insuficientes');
-        console.log('💡 SOLUÇÃO: Aguardar aprovação whatsapp_business_messaging ou usar token com whatsapp_business_management');
-      } else if (data.error?.code === 132000) {
-        console.log('🚨 PROBLEMA: Template não encontrado');
-        console.log('💡 SOLUÇÃO: hello_world deveria existir. Verificar conta/número');
-      } else if (data.error?.code === 131026) {
-        console.log('🚨 PROBLEMA: Número não autorizado');
-        console.log('💡 SOLUÇÃO: Verificar se o número está na lista de teste');
+      // Log detalhado para erros comuns
+      if (result.error.code === 100) {
+        console.error('⚠️ Erro 100: Parâmetro inválido ou template não encontrado');
+      } else if (result.error.code === 190) {
+        console.error('⚠️ Erro 190: Token expirado ou inválido');
+      } else if (result.error.code === 131030) {
+        console.error('⚠️ Erro 131030: Template não está aprovado ou ativo');
       }
       
-      return false;
+      return { success: false, error: result.error };
     }
     
+    console.log('✅ Mensagem enviada com sucesso!');
+    console.log('🆔 Message ID:', result.messages?.[0]?.id);
+    return { success: true, messageId: result.messages?.[0]?.id };
+    
   } catch (error) {
-    console.log('💥 ERRO FATAL NO ENVIO:', error.message);
-    console.log('🧾 Stack:', error.stack);
-    return false;
+    console.error('❌ Erro na requisição:', error.message);
+    return { success: false, error: error.message };
   }
 }
 
-// 🧪 FUNÇÃO DE TESTE LOCAL (para validar parsing)
-function testarParsing() {
-  const testes = [
-    'comprar leite as 18',
-    'pagar conta às 14:30',
-    'buscar crianças as 16h',
-    'ir no médico amanhã as 9',
-    'tomar remédio às 20:00'
-  ];
-  
-  console.log('\n🧪 TESTES DE PARSING (para referência):');
-  testes.forEach(teste => {
-    const match = teste.match(/(.+?)\s+(?:as|às|as|às)\s+(\d{1,2}(?::\d{2})?(?:\s*(?:h|hr|hs|horas?))?)/i);
-    if (match) {
-      console.log(`✅ "${teste}" → Tarefa: "${match[1].trim()}", Hora: "${match[2].trim()}"`);
-    } else {
-      console.log(`❌ "${teste}" → Não reconhecido`);
-    }
-  });
+// 🏗️ FUNÇÕES FUTURAS (PARA SUPABASE)
+/*
+async function saveReminder(userId, task, time) {
+  // Implementar quando Supabase estiver configurado
+  console.log(`💾 [FUTURO] Salvando lembrete: ${task} às ${time} para ${userId}`);
+  return 'temp-id-' + Date.now();
 }
 
-// Executar testes se rodando localmente
-if (typeof window === 'undefined' && process.argv.includes('--test')) {
-  testarParsing();
+async function getReminders(userId) {
+  // Implementar quando Supabase estiver configurado
+  console.log(`📋 [FUTURO] Buscando lembretes para ${userId}`);
+  return [];
 }
+
+async function markReminderDone(reminderId) {
+  // Implementar quando Supabase estiver configurado
+  console.log(`✅ [FUTURO] Marcando lembrete ${reminderId} como concluído`);
+  return true;
+}
+*/
