@@ -15,7 +15,10 @@ export default async function handler(req, res) {
     
     console.log(`📋 Parâmetros GET: mode=${mode}, token=${token}, challenge=${challenge}`);
     
-    if (mode === 'subscribe' && token === process.env.WEBHOOK_VERIFY_TOKEN) {
+    // 🔥 CORREÇÃO: Usar token fixo ou variável de ambiente
+    const WEBHOOK_VERIFY_TOKEN = process.env.WEBHOOK_VERIFY_TOKEN || 'MindItBot2024';
+    
+    if (mode === 'subscribe' && token === WEBHOOK_VERIFY_TOKEN) {
       console.log('✅ Token de verificação VÁLIDO! Webhook verificado.');
       return res.status(200).send(challenge);
     } else {
@@ -54,7 +57,22 @@ export default async function handler(req, res) {
             const from = message.from; // Número do remetente
             const messageType = message.type;
             const messageId = message.id;
-            const timestamp = new Date(parseInt(value.metadata.timestamp) * 1000).toISOString();
+            
+            // 🔥 CORREÇÃO CRÍTICA: TIMESTAMP SEGURO
+            let timestamp;
+            try {
+              // Usar timestamp da MENSAGEM (não do metadata)
+              const ts = message.timestamp;
+              if (ts) {
+                // Converter segundos para milissegundos (×1000)
+                timestamp = new Date(parseInt(ts) * 1000).toISOString();
+              } else {
+                timestamp = new Date().toISOString();
+              }
+            } catch (error) {
+              console.error('⚠️ Erro ao converter timestamp, usando data atual:', error);
+              timestamp = new Date().toISOString();
+            }
             
             console.log('\n📩 MENSAGEM WHATSAPP RECEBIDA:');
             console.log(`👤 Usuário: ${from}`);
@@ -224,24 +242,28 @@ async function sendWhatsAppMessage(to, templateName) {
   
   if (!accessToken || !phoneNumberId) {
     console.error('❌ Variáveis de ambiente não configuradas!');
+    console.error('Token:', accessToken ? '✅ Configurado' : '❌ Faltando');
+    console.error('Phone ID:', phoneNumberId ? '✅ Configurado' : '❌ Faltando');
     return { error: 'Configuração incompleta' };
   }
   
   // URL da API
   const url = `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`;
   
-  // 🔥 PAYLOAD CORRIGIDO - SIMPLIFICADO IGUAL AO PAINEL META
+  // 🔥 PAYLOAD CORRETO - SIMPLES IGUAL AO PAINEL META
   const payload = {
     messaging_product: 'whatsapp',
     to: to,
     type: 'template',
     template: {
       name: templateName,
-      language: { code: 'en_US' }  // APENAS ISSO! SEM components NEM policy
+      language: { code: 'en_US' }  // ✅ APENAS ISSO! SEM components NEM policy
     }
   };
   
   console.log('📦 Payload simplificado:', JSON.stringify(payload, null, 2));
+  console.log('🔗 URL:', url);
+  console.log('🔑 Token (primeiros 20):', accessToken.substring(0, 20) + '...');
   
   try {
     const response = await fetch(url, {
@@ -267,6 +289,8 @@ async function sendWhatsAppMessage(to, templateName) {
         console.error('⚠️ Erro 190: Token expirado ou inválido');
       } else if (result.error.code === 131030) {
         console.error('⚠️ Erro 131030: Template não está aprovado ou ativo');
+      } else if (result.error.code === 131031) {
+        console.error('⚠️ Erro 131031: Limite de taxa excedido');
       }
       
       return { success: false, error: result.error };
@@ -298,7 +322,7 @@ async function getReminders(userId) {
 
 async function markReminderDone(reminderId) {
   // Implementar quando Supabase estiver configurado
-  console.log(`✅ [FUTURO] Marcando lembrete ${reminderId} como concluído`);
+  console.log(`✅ [FUTURO] Marcando lembrete ${reminderId} como concluído');
   return true;
 }
 */
