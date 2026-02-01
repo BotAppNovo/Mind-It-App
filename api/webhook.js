@@ -1,4 +1,4 @@
-// api/webhook.js - VERSÃO PARA VALIDAÇÃO COM TEMPLATES
+// api/webhook.js - VERSÃO CORRIGIDA PARA VALIDAÇÃO COM TEMPLATES
 export default async function handler(req, res) {
   console.log('=== 🤖 MIND IT BOT - TEMPLATE MODE ===', new Date().toISOString());
   console.log('📡 Método:', req.method);
@@ -116,7 +116,7 @@ async function processarMensagem(userNumber, userText, phoneNumberId) {
       'lembrete_anotado',
       [
         { type: 'text', text: tarefa },
-        { type: 'text', text: this.formatarHoraParaExibicao(hora) }
+        { type: 'text', text: formatarHoraParaExibicao(hora) } // CORRIGIDO: sem "this."
       ]
     );
   }
@@ -162,15 +162,17 @@ async function processarMensagem(userNumber, userText, phoneNumberId) {
 
 // 🕒 FUNÇÃO AUXILIAR PARA FORMATAR HORA
 function formatarHoraParaExibicao(horaStr) {
-  // Converte "18" → "18h", "9" → "9h", "14:30" → "14h30"
-  const hora = horaStr.replace(/[^0-9:]/g, '');
+  // Remove tudo que não é número ou :
+  const horaLimpa = horaStr.replace(/[^0-9:]/g, '');
   
-  if (hora.includes(':')) {
-    const [horas, minutos] = hora.split(':');
+  // Se tem :, formata como "14h30"
+  if (horaLimpa.includes(':')) {
+    const [horas, minutos] = horaLimpa.split(':');
     return `${horas}h${minutos}`;
-  } else {
-    return `${hora}h`;
   }
+  
+  // Se não tem :, só adiciona "h"
+  return `${horaLimpa}h`;
 }
 
 // 📤 FUNÇÃO PARA ENVIAR TEMPLATE (PRINCIPAL)
