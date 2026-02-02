@@ -2,28 +2,23 @@
   "version": 2,
   "builds": [
     {
-      "src": "api/*.js",
+      "src": "api/index.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/webhook.js",
       "use": "@vercel/node"
     }
   ],
   "routes": [
     {
       "src": "/webhook",
-      "dest": "/api/webhook.js"
+      "dest": "api/webhook.js"
     },
     {
-      "src": "/api/check-reminders",
-      "dest": "/api/check-reminders.js"
-    },
-    {
-      "src": "/",
-      "dest": "/api/index.js"
-    }
-  ],
-  "crons": [
-    {
-      "path": "/api/check-reminders",
-      "schedule": "* * * * *" 
+      "src": "/(.*)",
+      "dest": "api/index.js",
+      "methods": ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]
     }
   ]
 }
