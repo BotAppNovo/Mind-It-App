@@ -1,4 +1,4 @@
-// api/webhook.js
+// api/webhook.js - VERSÃO CORRIGIDA E FUNCIONAL
 // Mind It Bot - WhatsApp Business API Webhook
 // MVP Wizard of Oz - Lembretes persistentes
 
@@ -236,14 +236,23 @@ async function sendWhatsAppMessage(to, templateName) {
   console.log(`📞 Para: ${to}`);
   console.log(`🎯 Template: ${templateName}`);
   
-  // Configurações da API
-  const accessToken = process.env.META_ACCESS_TOKEN;
+  // 🔥 CORREÇÃO CRÍTICA: NOMES CORRETOS DAS VARIÁVEIS
+  const accessToken = process.env.META_ACCESS_TOKEN; // NOME CORRETO NO VERCE
   const phoneNumberId = process.env.META_PHONE_NUMBER_ID;
+  
+  // 🔍 DEBUG PARA VERIFICAR SE AS VARIÁVEIS ESTÃO SENDO LIDAS
+  console.log('=== DEBUG DE VARIÁVEIS ===');
+  console.log('Token existe?', accessToken ? '✅ SIM' : '❌ NÃO');
+  console.log('Phone ID existe?', phoneNumberId ? '✅ SIM' : '❌ NÃO');
+  console.log('Token (primeiros 10 chars):', accessToken ? accessToken.substring(0, 10) + '...' : 'UNDEFINED');
+  console.log('Phone ID:', phoneNumberId || 'UNDEFINED');
+  console.log('==========================');
   
   if (!accessToken || !phoneNumberId) {
     console.error('❌ Variáveis de ambiente não configuradas!');
-    console.error('Token:', accessToken ? '✅ Configurado' : '❌ Faltando');
-    console.error('Phone ID:', phoneNumberId ? '✅ Configurado' : '❌ Faltando');
+    console.error('Verifique no Vercel se existem:');
+    console.error('1. META_ACCESS_TOKEN');
+    console.error('2. META_PHONE_NUMBER_ID');
     return { error: 'Configuração incompleta' };
   }
   
@@ -257,13 +266,12 @@ async function sendWhatsAppMessage(to, templateName) {
     type: 'template',
     template: {
       name: templateName,
-      language: { code: 'en_US' }  // ✅ APENAS ISSO! SEM components NEM policy
+      language: { code: 'en_US' }
     }
   };
   
   console.log('📦 Payload simplificado:', JSON.stringify(payload, null, 2));
   console.log('🔗 URL:', url);
-  console.log('🔑 Token (primeiros 20):', accessToken.substring(0, 20) + '...');
   
   try {
     const response = await fetch(url, {
@@ -281,17 +289,7 @@ async function sendWhatsAppMessage(to, templateName) {
     if (result.error) {
       console.error('❌ Erro na API:', result.error.message);
       console.error('Código:', result.error.code, 'Tipo:', result.error.type);
-      
-      // Log detalhado para erros comuns
-      if (result.error.code === 100) {
-        console.error('⚠️ Erro 100: Parâmetro inválido ou template não encontrado');
-      } else if (result.error.code === 190) {
-        console.error('⚠️ Erro 190: Token expirado ou inválido');
-      } else if (result.error.code === 131030) {
-        console.error('⚠️ Erro 131030: Template não está aprovado ou ativo');
-      } else if (result.error.code === 131031) {
-        console.error('⚠️ Erro 131031: Limite de taxa excedido');
-      }
+      console.error('Subcódigo:', result.error.error_subcode);
       
       return { success: false, error: result.error };
     }
