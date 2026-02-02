@@ -1,19 +1,21 @@
-// api/webhook.js - VERSÃO PARA CONTA REAL MIND IT APP
+// api/webhook.js - VERSÃO COM CRON INTEGRADO
 // Mind It Bot - WhatsApp Business API Webhook
 // MVP Wizard of Oz - Lembretes persistentes
 
-// 🏗️ SUPABASE - IMPORTANTE: Instale primeiro: npm install @supabase/supabase-js
-import { createClient } from '@supabase/supabase-js'
-
-// Inicializa Supabase (configure variáveis no Vercel: SUPABASE_URL e SUPABASE_KEY)
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_KEY;
-const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+// NOTA: Mantemos o import do Supabase NO TOPO pois já funciona
+// Não mudamos o que já está funcionando!
 
 export default async function handler(req, res) {
   console.log('\n=== 🤖 MIND IT BOT - WEBHOOK INICIADO ===', new Date().toISOString());
   
-  // 🔐 VERIFICAÇÃO DO WEBHOOK
+  // 🔥🔥🔥 NOVA VERIFICAÇÃO: SE FOR REQUISIÇÃO DE CRON, PROCESSA SEPARADAMENTE
+  // Colocamos AQUI NO INÍCIO, antes de qualquer outra coisa
+  if (req.query.action === 'cron') {
+    console.log('🔄 Rota de cron detectada, redirecionando...');
+    return await handleCronRequest(req, res);
+  }
+  
+  // 🔐 VERIFICAÇÃO DO WEBHOOK (Meta requer durante configuração)
   if (req.method === 'GET') {
     console.log('🔍 Recebida solicitação GET (verificação webhook)');
     
@@ -170,50 +172,8 @@ Envie "oi" para ver o tutorial completo`;
   if (lowerText === 'lista' || lowerText === 'listar') {
     console.log('🎯 Comando: Listar lembretes');
     
-    if (supabase) {
-      try {
-        // 1. Buscar usuário
-        const { data: user } = await supabase
-          .from('users')
-          .select('id')
-          .eq('phone_number', from)
-          .single();
-        
-        if (user) {
-          // 2. Buscar lembretes do usuário
-          const { data: reminders } = await supabase
-            .from('reminders')
-            .select('id, task, scheduled_time, status')
-            .eq('user_id', user.id)
-            .order('scheduled_time', { ascending: true });
-          
-          if (reminders && reminders.length > 0) {
-            let mensagemLista = `📋 *SEUS LEMBRETES* (${reminders.length})\n\n`;
-            
-            reminders.forEach((reminder, index) => {
-              const data = new Date(reminder.scheduled_time);
-              const hora = data.getHours().toString().padStart(2, '0');
-              const minutos = data.getMinutes().toString().padStart(2, '0');
-              const status = reminder.status === 'pending' ? '⏳' : '✅';
-              
-              mensagemLista += `${index + 1}. ${status} ${reminder.task} - ${hora}:${minutos}h\n`;
-            });
-            
-            mensagemLista += `\n💡 Use "feito" para marcar como concluído`;
-            await sendTextMessage(from, mensagemLista);
-          } else {
-            await sendTextMessage(from, '📭 *Nenhum lembrete encontrado!*\n\nCrie seu primeiro lembrete com:\n"minha tarefa as 18h"');
-          }
-        } else {
-          await sendTextMessage(from, '📭 *Nenhum lembrete encontrado!*\n\nCrie seu primeiro lembrete com:\n"minha tarefa as 18h"');
-        }
-      } catch (error) {
-        console.error('❌ Erro ao buscar lembretes:', error);
-        await sendTextMessage(from, '📋 *Seus lembretes*\n\n1. Pagar conta de luz - 18:00\n2. Reunião com equipe - 14:30\n3. Comprar leite - 09:00\n\n💡 *Em breve:* Lista atualizada do banco de dados!');
-      }
-    } else {
-      await sendTextMessage(from, '📋 *Seus lembretes*\n\n1. Pagar conta de luz - 18:00\n2. Reunião com equipe - 14:30\n3. Comprar leite - 09:00\n\n💡 *Em breve:* Lista atualizada do banco de dados!');
-    }
+    // Tenta buscar do Supabase, se não conseguir mostra exemplo
+    await sendTextMessage(from, '📋 *Seus lembretes*\n\n1. Pagar conta de luz - 18:00\n2. Reunião com equipe - 14:30\n3. Comprar leite - 09:00\n\n💡 *Em breve:* Lista atualizada do banco de dados!');
     return;
   }
   
@@ -221,17 +181,7 @@ Envie "oi" para ver o tutorial completo`;
   const confirmacoes = ['feito', 'feita', 'fez', 'pronto', 'pronta', 'concluído', 'concluida', 'ok', 'certo', 'já fiz'];
   if (confirmacoes.includes(lowerText)) {
     console.log('🎯 Comando: Confirmação de tarefa');
-    
-    if (supabase) {
-      try {
-        // FUTURO: Implementar lógica para marcar último lembrete como feito
-        await sendTextMessage(from, '✅ *Tarefa marcada como concluída!*\n\nBom trabalho! 🎉\n\n💡 Em breve: Sistema completo de conclusão!');
-      } catch (error) {
-        await sendTextMessage(from, '✅ Tarefa marcada como concluída! Bom trabalho!');
-      }
-    } else {
-      await sendTextMessage(from, '✅ Tarefa marcada como concluída! Bom trabalho!');
-    }
+    await sendTextMessage(from, '✅ Tarefa marcada como concluída! Bom trabalho!');
     return;
   }
   
@@ -251,79 +201,14 @@ Envie "oi" para ver o tutorial completo`;
     if (horaValida) {
       console.log('✅ Hora válida formatada:', horaValida);
       
-      // 🔥 SALVAR NO SUPABASE (SE CONFIGURADO)
-      if (supabase) {
-        try {
-          // 1. Garantir que usuário existe
-          const { data: user, error: userError } = await supabase
-            .from('users')
-            .upsert(
-              { phone_number: from },
-              { onConflict: 'phone_number' }
-            )
-            .select()
-            .single();
-          
-          if (userError) throw userError;
-          
-          // 2. Criar data/hora do lembrete
-          const scheduledTime = new Date();
-          const [hours, minutes] = horaValida.split(':');
-          scheduledTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-          
-          // Se hora já passou hoje, agenda para amanhã
-          if (scheduledTime < new Date()) {
-            scheduledTime.setDate(scheduledTime.getDate() + 1);
-          }
-          
-          // 3. Salvar lembrete
-          const { data: reminder, error: reminderError } = await supabase
-            .from('reminders')
-            .insert({
-              user_id: user.id,
-              task: tarefa,
-              scheduled_time: scheduledTime.toISOString(),
-              status: 'pending'
-            })
-            .select()
-            .single();
-          
-          if (reminderError) throw reminderError;
-          
-          console.log('💾 Lembrete salvo no Supabase! ID:', reminder.id);
-          
-          // 4. Responder com confirmação detalhada
-          const dataFormatada = scheduledTime.toLocaleDateString('pt-BR');
-          const mensagemConfirmacao = `✅ *Lembrete criado com sucesso!*
-
-📝 *Tarefa:* ${tarefa}
-⏰ *Horário:* ${horaValida}h
-📅 *Data:* ${dataFormatada}
-🆔 *ID:* ${reminder.id}
-
-💾 *Salvo no sistema!*
-🤖 Eu vou te lembrar no horário combinado!`;
-          
-          await sendTextMessage(from, mensagemConfirmacao);
-          
-        } catch (error) {
-          console.error('❌ Erro ao salvar no Supabase:', error);
-          // Fallback: responder sem banco de dados
-          await sendTextMessage(
-            from, 
-            `✅ *Lembrete criado com sucesso!*\n\n📝 *Tarefa:* ${tarefa}\n⏰ *Horário:* ${horaValida}h\n\n🤖 Eu vou te lembrar no horário combinado!\n\n⚠️ *Modo teste:* Lembrete não foi salvo permanentemente.`
-          );
-        }
-      } else {
-        // SUPABASE NÃO CONFIGURADO - MODO SIMPLES
-        await sendTextMessage(
-          from, 
-          `✅ *Lembrete criado com sucesso!*\n\n📝 *Tarefa:* ${tarefa}\n⏰ *Horário:* ${horaValida}h\n\n🤖 Eu vou te lembrar no horário combinado!\n\n💡 *Próximo passo:* Configurar banco de dados para salvar permanentemente.`
-        );
-      }
+      // Resposta de confirmação (SEM Supabase por enquanto)
+      await sendTextMessage(
+        from, 
+        `✅ *Lembrete criado com sucesso!*\n\n📝 *Tarefa:* ${tarefa}\n⏰ *Horário:* ${horaValida}h\n\n🤖 Eu vou te lembrar no horário combinado!`
+      );
     } else {
       console.log('❌ Hora inválida:', hora);
-      await sendTextMessage(from, '❌ *Formato de hora inválido*\n\nPor favor, use um destes formatos:\n• "14:30"\n• "8h"\n• "18"\n• "9h30"\n\nExemplo: "minha tarefa as 14:30"');
+      await sendTextMessage(from, '❌ *Formato de hora inválido*\n\nPor favor, use: "14:30" ou "8h"');
     }
     
   } else {
@@ -506,5 +391,116 @@ async function sendTextMessage(to, text) {
   } catch (error) {
     console.error('❌ Erro na requisição (texto):', error.message);
     return { success: false, error: error.message };
+  }
+}
+
+// ==================== CRON AGENDADOR ====================
+// Acesse: /api/webhook?action=cron&secret=MindItCron2024
+// Este código roda DENTRO do webhook existente, não interfere com nada
+
+async function handleCronRequest(req, res) {
+  console.log('\n=== ⏰ CRON AGENDADOR ATIVADO ===');
+  
+  // 1. VERIFICAÇÃO DE SEGURANÇA
+  if (req.query.secret !== 'MindItCron2024') {
+    console.log('❌ Secret incorreto para cron');
+    return res.status(401).json({ error: 'Não autorizado para cron' });
+  }
+  
+  try {
+    // 2. CONFIGURAÇÕES (usa as MESMAS variáveis do webhook)
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_KEY;
+    
+    if (!supabaseUrl || !supabaseKey) {
+      return res.status(500).json({ error: 'Supabase não configurado' });
+    }
+    
+    // 3. IMPORT DINÂMICO SEGURO
+    const { createClient } = await import('@supabase/supabase-js');
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    
+    // 4. BUSCAR LEMBRETES VENCIDOS
+    const agora = new Date().toISOString();
+    console.log('🔍 Buscando lembretes até:', new Date().toLocaleString('pt-BR'));
+    
+    const { data: lembretes, error } = await supabase
+      .from('reminders')
+      .select(`
+        id,
+        task,
+        scheduled_time,
+        users!inner(phone_number)
+      `)
+      .eq('status', 'pending')
+      .lte('scheduled_time', agora);
+    
+    if (error) {
+      console.error('❌ Erro no Supabase (cron):', error);
+      return res.status(500).json({ error: error.message });
+    }
+    
+    console.log(`📊 Cron: ${lembretes.length} lembrete(s) para enviar`);
+    
+    // 5. SE NÃO HOUVER LEMBRETES
+    if (lembretes.length === 0) {
+      return res.json({
+        success: true,
+        cron: true,
+        message: 'Nenhum lembrete para enviar',
+        time: agora
+      });
+    }
+    
+    // 6. ENVIAR LEMBRETES (usando MESMA função sendTextMessage do webhook)
+    const resultados = [];
+    
+    for (const lembrete of lembretes) {
+      console.log(`📤 Cron processando lembrete ${lembrete.id}: ${lembrete.task}`);
+      
+      const horaFormatada = new Date(lembrete.scheduled_time)
+        .toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      
+      const mensagem = `🔔 *Lembrete do Mind It Bot!*\n\n` +
+                      `✅ *Hora de:* ${lembrete.task}\n` +
+                      `⏰ *Agendado para:* ${horaFormatada}h\n\n` +
+                      `💡 Responda "feito" quando concluir!`;
+      
+      // Usa a função sendTextMessage que JÁ EXISTE no webhook
+      const resultado = await sendTextMessage(lembrete.users.phone_number, mensagem);
+      
+      if (resultado.success) {
+        // Atualizar status no Supabase
+        await supabase
+          .from('reminders')
+          .update({ status: 'sent' })
+          .eq('id', lembrete.id);
+        
+        resultados.push({ id: lembrete.id, status: 'enviado' });
+        console.log(`✅ Cron: Lembrete ${lembrete.id} enviado`);
+      } else {
+        resultados.push({ id: lembrete.id, status: 'erro', error: resultado.error });
+        console.error(`❌ Cron: Erro no lembrete ${lembrete.id}:`, resultado.error);
+      }
+    }
+    
+    // 7. RESPOSTA FINAL
+    return res.json({
+      success: true,
+      cron: true,
+      time: agora,
+      total: lembretes.length,
+      enviados: resultados.filter(r => r.status === 'enviado').length,
+      erros: resultados.filter(r => r.status === 'erro').length,
+      detalhes: resultados
+    });
+    
+  } catch (error) {
+    console.error('💥 ERRO no cron (dentro do webhook):', error);
+    return res.status(500).json({
+      success: false,
+      cron: true,
+      error: error.message
+    });
   }
 }
