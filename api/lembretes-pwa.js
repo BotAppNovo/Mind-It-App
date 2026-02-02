@@ -26,7 +26,7 @@ export default async function handler(req, res) {
           id: 2,
           task: "Exemplo: Reunião",
           scheduled_time: new Date(Date.now() + 3600000).toISOString(),
-          status: "pending"
+          status: "pending" 
         }
       ]
     });
