@@ -2,15 +2,7 @@
   "version": 2,
   "builds": [
     {
-      "src": "api/webhook.js",
-      "use": "@vercel/node"
-    },
-    {
-      "src": "api/cron-recurrent.js",
-      "use": "@vercel/node"
-    },
-    {
-      "src": "api/lembretes-pwa.js",
+      "src": "api/*.js",
       "use": "@vercel/node"
     }
   ],
@@ -25,8 +17,7 @@
     },
     {
       "src": "/api/lembretes-pwa",
-      "dest": "/api/lembretes-pwa.js",
-      "methods": ["GET", "POST", "OPTIONS"]
+      "dest": "/api/lembretes-pwa.js"
     },
     {
       "src": "/(.*)",
