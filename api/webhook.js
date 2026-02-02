@@ -24,7 +24,7 @@ export default async function handler(req, res) {
       console.log('✅ Token de verificação VÁLIDO!');
       return res.status(200).send(challenge);
     } else {
-      console.log('❌ Token de verificação INVÁLIDO!');
+      console.log('❌ Token de verificação INVÁLIDO!'); 
       return res.status(403).send('Token de verificação inválido');
     }
   }
