@@ -1,4 +1,4 @@
-// api/webhook.js - VERSÃO CORRIGIDA PARA SUA ESTRUTURA SUPABASE
+// api/webhook.js - VERSÃO COMPLETA COM LÓGICA DE AGENDAMENTO INTELIGENTE
 // Mind It Bot - WhatsApp Business API Webhook
 
 import { createClient } from '@supabase/supabase-js';
@@ -8,7 +8,6 @@ const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Verificar conexão
 console.log('🔗 Supabase configurado:', supabaseUrl ? '✅' : '❌');
 
 export default async function handler(req, res) {
@@ -50,15 +49,17 @@ export default async function handler(req, res) {
             
             const from = message.from;
             const messageType = message.type;
+            const timestamp = message.timestamp ? parseInt(message.timestamp) * 1000 : Date.now();
             
             console.log('\n📩 MENSAGEM RECEBIDA:');
             console.log(`👤 Usuário: ${from}`);
+            console.log(`⏰ Recebida em: ${new Date(timestamp).toISOString()}`);
             console.log(`📝 Tipo: ${messageType}`);
             
             if (messageType === 'text') {
               const messageText = message.text.body;
               console.log(`💬 Texto: ${messageText}`);
-              await processMessage(from, messageText);
+              await processMessage(from, messageText, timestamp);
             } else {
               await sendWhatsAppMessage(from, 'hello_world');
             }
@@ -78,19 +79,20 @@ export default async function handler(req, res) {
 }
 
 // 🔧 FUNÇÃO PRINCIPAL DE PROCESSAMENTO
-async function processMessage(from, text) {
+async function processMessage(from, text, messageTimestamp) {
   console.log(`\n⚙️ PROCESSANDO: "${text}"`);
+  console.log(`⏰ Timestamp da mensagem: ${new Date(messageTimestamp).toISOString()}`);
   
   const lowerText = text.toLowerCase().trim();
   
   // COMANDOS ESPECIAIS
   if (lowerText === 'oi' || lowerText === 'olá' || lowerText === 'ola' || lowerText === 'hello') {
-    await sendWhatsAppMessage(from, 'hello_world');
+    await sendTextMessage(from, '🤖 *Olá! Eu sou o Mind It Bot!*\n\nPara criar um lembrete, basta me dizer:\n\n• "Fazer contrato" (lembro em 1 hora)\n• "Reunião as 14h" (hoje às 14:00)\n• "Estudar amanhã" (amanhã, vou perguntar o horário)\n• "Academia segunda" (próxima segunda, vou perguntar o horário)');
     return;
   }
   
   if (lowerText === 'ajuda' || lowerText === 'help') {
-    await sendTextMessage(from, '🤖 *Mind It Bot - Ajuda*\n\nPara criar um lembrete, digite:\n"*[tarefa]* as *[hora]*"\n\nExemplo: "Lembrar de pagar conta amanhã as 18:00"');
+    await sendTextMessage(from, '🤖 *Mind It Bot - Ajuda*\n\n📋 *Como criar lembretes:*\n\n1. *Tarefa simples:* "Fazer exercícios"\n   → Lembrado em 1 hora\n\n2. *Com hora:* "Reunião as 15:30"\n   → Hoje no horário\n\n3. *Com dia:* "Pagar contas amanhã"\n   → Amanhã, pergunto o horário\n\n4. *Dia da semana:* "Dentista quarta"\n   → Próxima quarta, pergunto o horário\n\n📝 Use "lista" para ver seus lembretes');
     return;
   }
   
@@ -115,34 +117,213 @@ async function processMessage(from, text) {
     return;
   }
   
-  // 📝 PARSING DO FORMATO "[tarefa] as [hora]"
-  const regex = /(.+?)\s+as\s+(\d{1,2}(?:[:.]\d{2})?)\s*(?:h|hr|hrs)?/i;
-  const match = text.match(regex);
+  // 📝 ANÁLISE INTELIGENTE DA MENSAGEM
+  const analise = analisarMensagem(text, messageTimestamp);
+  console.log('🔍 Análise da mensagem:', analise);
   
-  if (match) {
-    const tarefa = match[1].trim();
-    const hora = match[2].trim();
-    const horaValida = validarHora(hora);
-    
-    if (horaValida) {
-      await criarLembrete(from, tarefa, horaValida);
-    } else {
-      await sendTextMessage(from, '❌ *Formato de hora inválido*\n\nUse: "14:30" ou "8h"');
-    }
-  } else {
-    await sendTextMessage(from, '🤖 *Formato:*\n"*[tarefa]* as *[hora]*"\n\n📝 *Exemplos:*\n• "Tomar remédio as 20:00"\n• "Reunião as 14:30"\n\n📋 Use "lista" para ver seus lembretes.');
+  // Se tem dia mas não tem hora, perguntar o horário
+  if (analise.dia && !analise.hora) {
+    await perguntarHorario(from, analise);
+    return;
   }
+  
+  // Se tem tudo, criar lembrete
+  if (analise.tarefa) {
+    await criarLembrete(from, analise);
+    return;
+  }
+  
+  // Se não entendeu, mostrar ajuda
+  await sendTextMessage(from, '🤖 *Como criar um lembrete:*\n\n1. *Tarefa:* "Fazer contrato"\n2. *Tarefa + Hora:* "Tomar remédio as 20h"\n3. *Tarefa + Dia:* "Reunião amanhã"\n4. *Tarefa + Dia da semana:* "Dentista quarta"\n\n📝 Exemplos:\n• "Estudar as 15"\n• "Pagar conta amanhã"\n• "Academia segunda-feira as 18:30"');
+}
+
+// 🔍 ANÁLISE INTELIGENTE DA MENSAGEM
+function analisarMensagem(texto, timestampMensagem) {
+  const textoLimpo = texto.toLowerCase().trim();
+  const agora = new Date(timestampMensagem);
+  const resultado = {
+    tarefa: '',
+    hora: null,
+    dia: null,
+    dataCompleta: null,
+    tipo: 'desconhecido'
+  };
+  
+  // Expressões regulares para diferentes formatos
+  const padroes = {
+    // Tarefa + as + Hora (ex: "Reunião as 14h")
+    tarefaHora: /(.+?)\s+as\s+(\d{1,2}(?:[:.]?\d{0,2})?\s*(?:h|hr|hrs|horas)?)/i,
+    
+    // Tarefa + Hora sem "as" (ex: "Reunião 14h")
+    tarefaDiretoHora: /(.+?)\s+(\d{1,2}(?:[:.]?\d{0,2})?\s*(?:h|hr|hrs|horas))/i,
+    
+    // Apenas hora no final (ex: "Estudar 15")
+    apenasHoraFinal: /(.+?)\s+(\d{1,2})\s*$/,
+    
+    // Tarefa + Dia (ex: "Fazer compras amanhã")
+    tarefaDia: /(.+?)\s+(amanhã|amanha|hoje|segunda|terça|terca|quarta|quinta|sexta|sábado|sabado|domingo)(?:\s*-?\s*feira)?/i,
+    
+    // Tarefa + Dia + Hora (ex: "Reunião quarta 14h")
+    tarefaDiaHora: /(.+?)\s+(amanhã|amanha|hoje|segunda|terça|terca|quarta|quinta|sexta|sábado|sabado|domingo)(?:\s*-?\s*feira)?\s+(\d{1,2}(?:[:.]?\d{0,2})?\s*(?:h|hr|hrs|horas)?)/i
+  };
+  
+  // Tentar cada padrão
+  let match = null;
+  
+  // 1. Tarefa + Dia + Hora
+  match = textoLimpo.match(padroes.tarefaDiaHora);
+  if (match) {
+    resultado.tarefa = match[1].trim();
+    resultado.dia = match[2].toLowerCase();
+    resultado.hora = extrairHora(match[3]);
+    resultado.tipo = 'tarefa_dia_hora';
+    resultado.dataCompleta = calcularData(resultado.dia, resultado.hora, agora);
+    return resultado;
+  }
+  
+  // 2. Tarefa + as + Hora
+  match = textoLimpo.match(padroes.tarefaHora);
+  if (match) {
+    resultado.tarefa = match[1].trim();
+    resultado.hora = extrairHora(match[2]);
+    resultado.tipo = 'tarefa_hora';
+    resultado.dataCompleta = calcularData('hoje', resultado.hora, agora);
+    return resultado;
+  }
+  
+  // 3. Tarefa + Hora direto
+  match = textoLimpo.match(padroes.tarefaDiretoHora);
+  if (match) {
+    resultado.tarefa = match[1].trim();
+    resultado.hora = extrairHora(match[2]);
+    resultado.tipo = 'tarefa_hora_direto';
+    resultado.dataCompleta = calcularData('hoje', resultado.hora, agora);
+    return resultado;
+  }
+  
+  // 4. Tarefa + Dia
+  match = textoLimpo.match(padroes.tarefaDia);
+  if (match) {
+    resultado.tarefa = match[1].trim();
+    resultado.dia = match[2].toLowerCase();
+    resultado.tipo = 'tarefa_dia';
+    // Não tem hora, será perguntada depois
+    return resultado;
+  }
+  
+  // 5. Apenas hora no final
+  match = textoLimpo.match(padroes.apenasHoraFinal);
+  if (match) {
+    resultado.tarefa = match[1].trim();
+    resultado.hora = extrairHora(match[2]);
+    resultado.tipo = 'tarefa_hora_simples';
+    resultado.dataCompleta = calcularData('hoje', resultado.hora, agora);
+    return resultado;
+  }
+  
+  // 6. Apenas tarefa (sem hora nem dia)
+  resultado.tarefa = texto.trim();
+  resultado.tipo = 'tarefa_simples';
+  
+  // Para tarefa simples: 1 hora depois da mensagem
+  const umaHoraDepois = new Date(agora);
+  umaHoraDepois.setHours(umaHoraDepois.getHours() + 1);
+  resultado.dataCompleta = umaHoraDepois;
+  resultado.hora = `${umaHoraDepois.getHours().toString().padStart(2, '0')}:${umaHoraDepois.getMinutes().toString().padStart(2, '0')}`;
+  
+  return resultado;
+}
+
+// 🕒 EXTRAIR HORA DE STRING
+function extrairHora(textoHora) {
+  if (!textoHora) return null;
+  
+  const limpo = textoHora.trim().replace(/[hhrs:.]/g, '');
+  let horas = 0;
+  let minutos = 0;
+  
+  if (limpo.length === 1 || limpo.length === 2) {
+    // Formato: "9" ou "14"
+    horas = parseInt(limpo, 10);
+  } else if (limpo.length === 3) {
+    // Formato: "930"
+    horas = parseInt(limpo.substring(0, 1), 10);
+    minutos = parseInt(limpo.substring(1), 10);
+  } else if (limpo.length === 4) {
+    // Formato: "0930" ou "1430"
+    horas = parseInt(limpo.substring(0, 2), 10);
+    minutos = parseInt(limpo.substring(2), 10);
+  }
+  
+  // Validar
+  if (horas < 0 || horas > 23 || minutos < 0 || minutos > 59) {
+    return null;
+  }
+  
+  return `${horas.toString().padStart(2, '0')}:${minutos.toString().padStart(2, '0')}`;
+}
+
+// 📅 CALCULAR DATA COMPLETA
+function calcularData(dia, hora, dataAtual) {
+  if (!dia || !hora) return null;
+  
+  const resultado = new Date(dataAtual);
+  const [horas, minutos] = hora.split(':').map(Number);
+  
+  // Ajustar hora
+  resultado.setHours(horas, minutos, 0, 0);
+  
+  // Ajustar dia
+  const diasSemana = {
+    'domingo': 0, 'segunda': 1, 'terça': 2, 'terca': 2, 
+    'quarta': 3, 'quinta': 4, 'sexta': 5, 'sábado': 6, 'sabado': 6
+  };
+  
+  if (dia === 'amanhã' || dia === 'amanha') {
+    resultado.setDate(resultado.getDate() + 1);
+  } else if (dia === 'hoje') {
+    // Já está hoje
+  } else if (diasSemana[dia] !== undefined) {
+    const diaDesejado = diasSemana[dia];
+    const diaAtual = resultado.getDay();
+    let diasParaAdicionar = diaDesejado - diaAtual;
+    
+    if (diasParaAdicionar <= 0) {
+      diasParaAdicionar += 7; // Próxima semana
+    }
+    
+    resultado.setDate(resultado.getDate() + diasParaAdicionar);
+  }
+  
+  // Verificar se a hora já passou hoje
+  if (dia === 'hoje' || !diasSemana[dia]) {
+    if (resultado < dataAtual) {
+      // Se hora já passou, agenda para amanhã
+      resultado.setDate(resultado.getDate() + 1);
+    }
+  }
+  
+  return resultado;
+}
+
+// ❓ PERGUNTAR HORÁRIO
+async function perguntarHorario(phoneNumber, analise) {
+  console.log(`❓ Perguntando horário para: ${analise.tarefa} (${analise.dia})`);
+  
+  const mensagem = `⏰ *Para "${analise.tarefa}"*\n\nEm qual horário ${analise.dia === 'amanhã' || analise.dia === 'amanha' ? 'amanhã' : `na ${analise.dia}`}?\n\nDigite apenas o horário:\n• "14"\n• "18h"\n• "09:30"\n• "20:00"`;
+  
+  // Armazenar contexto para quando responder
+  // (Em produção, precisaríamos de um sistema de estado)
+  await sendTextMessage(phoneNumber, mensagem);
 }
 
 // 📥 CRIAR LEMBRETE NO SUPABASE
-async function criarLembrete(phoneNumber, tarefa, hora) {
-  console.log(`📥 Criando lembrete para ${phoneNumber}: ${tarefa} às ${hora}`);
+async function criarLembrete(phoneNumber, analise) {
+  console.log('📥 Criando lembrete:', analise);
   
   try {
-    // 1. Primeiro, buscar ou criar o usuário
+    // 1. Buscar ou criar usuário
     let userId;
-    
-    // Buscar usuário pelo número
     const { data: userData, error: userError } = await supabase
       .from('users')
       .select('id')
@@ -150,18 +331,14 @@ async function criarLembrete(phoneNumber, tarefa, hora) {
       .single();
     
     if (userError && userError.code === 'PGRST116') {
-      // Usuário não existe, criar novo
-      console.log('👤 Usuário não encontrado, criando novo...');
+      // Criar novo usuário
       const { data: newUser, error: createError } = await supabase
         .from('users')
         .insert([{ phone_number: phoneNumber }])
         .select()
         .single();
       
-      if (createError) {
-        throw createError;
-      }
-      
+      if (createError) throw createError;
       userId = newUser.id;
       console.log('👤✅ Novo usuário criado:', userId);
     } else if (userError) {
@@ -171,42 +348,97 @@ async function criarLembrete(phoneNumber, tarefa, hora) {
       console.log('👤✅ Usuário encontrado:', userId);
     }
     
-    // 2. Criar o lembrete
+    // 2. Preparar dados
+    const dataAgendamento = analise.dataCompleta || new Date();
+    
     const lembreteData = {
       user_id: userId,
-      task: tarefa,
-      scheduled_time: hora, // Usando scheduled_time que existe na sua tabela
-      status: 'pending'
+      task: analise.tarefa,
+      scheduled_time: dataAgendamento.toISOString(), // Timestamp completo
+      status: 'pending',
+      original_message: JSON.stringify(analise)
     };
     
     console.log('💾 Salvando lembrete:', lembreteData);
     
+    // 3. Salvar no Supabase
     const { data, error } = await supabase
       .from('reminders')
       .insert([lembreteData])
       .select();
     
     if (error) {
-      console.error('❌ Erro ao salvar lembrete:', error);
-      await sendTextMessage(
-        phoneNumber, 
-        `✅ *Lembrete criado localmente!*\n\n📝 *Tarefa:* ${tarefa}\n⏰ *Horário:* ${hora}h`
-      );
+      console.error('❌ Erro ao salvar:', error);
+      
+      // Tentar formato alternativo
+      const lembreteDataAlt = {
+        user_id: userId,
+        task: analise.tarefa,
+        scheduled_time: dataAgendamento.toISOString().split('.')[0] + 'Z',
+        status: 'pending'
+      };
+      
+      const { data: dataAlt, error: errorAlt } = await supabase
+        .from('reminders')
+        .insert([lembreteDataAlt])
+        .select();
+      
+      if (errorAlt) {
+        console.error('❌ Também falhou:', errorAlt);
+        throw errorAlt;
+      }
+      
+      console.log('💾✅ Lembrete salvo (alternativo):', dataAlt);
+      await enviarConfirmacao(phoneNumber, analise, dataAlt[0].id, dataAgendamento);
     } else {
       console.log('💾✅ Lembrete salvo:', data);
-      await sendTextMessage(
-        phoneNumber, 
-        `✅ *Lembrete criado com sucesso!*\n\n📝 *Tarefa:* ${tarefa}\n⏰ *Horário:* ${hora}h\n🆔 *ID:* ${data[0].id}\n\n📋 Use "lista" para ver seus lembretes.`
-      );
+      await enviarConfirmacao(phoneNumber, analise, data[0].id, dataAgendamento);
     }
     
   } catch (error) {
-    console.error('❌ Erro no processo de criação:', error);
+    console.error('❌ Erro no processo:', error);
     await sendTextMessage(
       phoneNumber, 
-      `✅ *Lembrete anotado!*\n\n📝 *Tarefa:* ${tarefa}\n⏰ *Horário:* ${hora}h\n\n⚠️ Sistema temporário, mas vou lembrar!`
+      `✅ *Lembrete criado localmente!*\n\n📝 *Tarefa:* ${analise.tarefa}\n⏰ *Quando:* ${formatarDataHora(analise.dataCompleta || new Date())}\n\n🤖 Vou te lembrar!`
     );
   }
+}
+
+// ✅ ENVIAR CONFIRMAÇÃO
+async function enviarConfirmacao(phoneNumber, analise, lembreteId, dataAgendamento) {
+  let mensagem = '';
+  
+  switch (analise.tipo) {
+    case 'tarefa_simples':
+      mensagem = `✅ *Lembrete criado!*\n\n📝 *Tarefa:* ${analise.tarefa}\n⏰ *Quando:* Em 1 hora (${formatarHora(dataAgendamento)})\n🆔 *ID:* ${lembreteId}`;
+      break;
+      
+    case 'tarefa_hora':
+    case 'tarefa_hora_direto':
+    case 'tarefa_hora_simples':
+      const hoje = new Date();
+      const amanha = new Date(hoje);
+      amanha.setDate(amanha.getDate() + 1);
+      
+      const quando = dataAgendamento.getDate() === amanha.getDate() 
+        ? `amanhã às ${analise.hora}h` 
+        : `hoje às ${analise.hora}h`;
+      
+      mensagem = `✅ *Lembrete criado!*\n\n📝 *Tarefa:* ${analise.tarefa}\n⏰ *Quando:* ${quando}\n🆔 *ID:* ${lembreteId}`;
+      break;
+      
+    case 'tarefa_dia_hora':
+      const diaSemana = formatarDiaSemana(analise.dia);
+      mensagem = `✅ *Lembrete criado!*\n\n📝 *Tarefa:* ${analise.tarefa}\n⏰ *Quando:* ${diaSemana} às ${analise.hora}h\n🆔 *ID:* ${lembreteId}`;
+      break;
+      
+    default:
+      mensagem = `✅ *Lembrete criado!*\n\n📝 *Tarefa:* ${analise.tarefa}\n⏰ *Quando:* ${formatarDataHora(dataAgendamento)}\n🆔 *ID:* ${lembreteId}`;
+  }
+  
+  mensagem += '\n\n📋 Use "lista" para ver seus lembretes.';
+  
+  await sendTextMessage(phoneNumber, mensagem);
 }
 
 // 📋 LISTAR LEMBRETES
@@ -214,7 +446,6 @@ async function listarLembretes(phoneNumber) {
   console.log(`📋 Listando lembretes para ${phoneNumber}`);
   
   try {
-    // 1. Buscar usuário
     const { data: user, error: userError } = await supabase
       .from('users')
       .select('id')
@@ -222,37 +453,46 @@ async function listarLembretes(phoneNumber) {
       .single();
     
     if (userError || !user) {
-      console.log('👤 Usuário não encontrado');
       await sendTextMessage(phoneNumber, '📋 *Seus lembretes*\n\nNenhum lembrete encontrado!');
       return;
     }
     
-    // 2. Buscar lembretes do usuário
     const { data: lembretes, error } = await supabase
       .from('reminders')
-      .select('id, task, scheduled_time, created_at, status')
+      .select('id, task, scheduled_time, status')
       .eq('user_id', user.id)
       .eq('status', 'pending')
-      .order('created_at', { ascending: false })
+      .order('scheduled_time', { ascending: true })
       .limit(10);
     
     if (error) {
-      console.error('❌ Erro ao buscar lembretes:', error);
+      console.error('❌ Erro ao buscar:', error);
       await sendTextMessage(phoneNumber, '📋 *Seus lembretes*\n\nErro ao buscar lembretes.');
       return;
     }
     
     if (!lembretes || lembretes.length === 0) {
-      await sendTextMessage(phoneNumber, '📋 *Seus lembretes*\n\nNenhum lembrete pendente! 🎉\n\nCrie um: "Tarefa as hora"');
+      await sendTextMessage(phoneNumber, '📋 *Seus lembretes*\n\nNenhum lembrete pendente! 🎉');
       return;
     }
     
-    // 3. Formatar resposta
     let mensagem = '📋 *Seus lembretes pendentes:*\n\n';
     lembretes.forEach((lembrete, index) => {
-      const dataCriacao = new Date(lembrete.created_at);
-      const dataFormatada = formatarData(dataCriacao);
-      mensagem += `${index + 1}. ${lembrete.task} - ${dataFormatada} às ${lembrete.scheduled_time}h (ID: ${lembrete.id})\n`;
+      const data = new Date(lembrete.scheduled_time);
+      const agora = new Date();
+      const diffHoras = Math.floor((data - agora) / (1000 * 60 * 60));
+      
+      let quando = '';
+      if (diffHoras < 24) {
+        quando = `hoje às ${data.getHours().toString().padStart(2, '0')}:${data.getMinutes().toString().padStart(2, '0')}h`;
+      } else if (diffHoras < 48) {
+        quando = `amanhã às ${data.getHours().toString().padStart(2, '0')}:${data.getMinutes().toString().padStart(2, '0')}h`;
+      } else {
+        const dias = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
+        quando = `${dias[data.getDay()]} às ${data.getHours().toString().padStart(2, '0')}:${data.getMinutes().toString().padStart(2, '0')}h`;
+      }
+      
+      mensagem += `${index + 1}. ${lembrete.task} - ${quando} (ID: ${lembrete.id})\n`;
     });
     
     mensagem += '\nPara marcar como feito: "feito [ID]"';
@@ -261,16 +501,15 @@ async function listarLembretes(phoneNumber) {
     
   } catch (error) {
     console.error('❌ Erro no comando lista:', error);
-    await sendTextMessage(phoneNumber, '📋 *Seus lembretes*\n\n1. Pagar conta de luz - 18:00\n2. Reunião com equipe - 14:30');
+    await sendTextMessage(phoneNumber, '📋 *Seus lembretes*\n\nErro ao carregar lista.');
   }
 }
 
-// ✅ MARCAR LEMBRETE COMO FEITO
+// ✅ MARCAR COMO FEITO
 async function marcarComoFeito(phoneNumber, lembreteId) {
-  console.log(`✅ Marcando lembrete ${lembreteId} como feito para ${phoneNumber}`);
+  console.log(`✅ Marcando lembrete ${lembreteId} como feito`);
   
   try {
-    // 1. Buscar usuário
     const { data: user, error: userError } = await supabase
       .from('users')
       .select('id')
@@ -282,7 +521,6 @@ async function marcarComoFeito(phoneNumber, lembreteId) {
       return;
     }
     
-    // 2. Atualizar lembrete (apenas se pertencer ao usuário)
     const { data, error } = await supabase
       .from('reminders')
       .update({ 
@@ -302,7 +540,7 @@ async function marcarComoFeito(phoneNumber, lembreteId) {
     if (data && data.length > 0) {
       await sendTextMessage(phoneNumber, `✅ *Tarefa concluída!*\n\n"${data[0].task}" marcada como feita. 🎉`);
     } else {
-      await sendTextMessage(phoneNumber, '❌ Lembrete não encontrado ou não pertence a você.');
+      await sendTextMessage(phoneNumber, '❌ Lembrete não encontrado.');
     }
     
   } catch (error) {
@@ -311,75 +549,44 @@ async function marcarComoFeito(phoneNumber, lembreteId) {
   }
 }
 
-// 🕒 VALIDAR E FORMATAR HORA
-function validarHora(horaString) {
-  try {
-    let horaFormatada = horaString.replace('.', ':');
-    
-    if (!horaFormatada.includes(':')) {
-      horaFormatada += ':00';
-    }
-    
-    const [horasStr, minutosStr] = horaFormatada.split(':');
-    let horas = parseInt(horasStr, 10);
-    const minutos = parseInt(minutosStr, 10) || 0;
-    
-    if (horas < 0 || horas > 23 || minutos < 0 || minutos > 59) {
-      return null;
-    }
-    
-    const horasFormatadas = horas.toString().padStart(2, '0');
-    const minutosFormatados = minutos.toString().padStart(2, '0');
-    
-    return `${horasFormatadas}:${minutosFormatados}`;
-    
-  } catch (error) {
-    console.error('❌ Erro ao validar hora:', error);
-    return null;
-  }
-}
-
-// 📅 FORMATAR DATA
-function formatarData(data) {
-  try {
-    const hoje = new Date();
-    const amanha = new Date();
-    amanha.setDate(amanha.getDate() + 1);
-    
-    const dataObj = new Date(data);
-    
-    // Verificar se é hoje
-    if (
-      dataObj.getDate() === hoje.getDate() &&
-      dataObj.getMonth() === hoje.getMonth() &&
-      dataObj.getFullYear() === hoje.getFullYear()
-    ) {
-      return 'hoje';
-    }
-    
-    // Verificar se é amanhã
-    if (
-      dataObj.getDate() === amanha.getDate() &&
-      dataObj.getMonth() === amanha.getMonth() &&
-      dataObj.getFullYear() === amanha.getFullYear()
-    ) {
-      return 'amanhã';
-    }
-    
-    // Outra data
-    const dia = dataObj.getDate().toString().padStart(2, '0');
-    const mes = (dataObj.getMonth() + 1).toString().padStart(2, '0');
-    return `${dia}/${mes}`;
-    
-  } catch (error) {
-    return 'data desconhecida';
-  }
-}
-
-// 📤 FUNÇÕES DE ENVIO DE MENSAGENS (MANTIDAS IGUAIS)
-async function sendWhatsAppMessage(to, templateName) {
-  console.log(`\n🚀 ENVIANDO MENSAGEM WHATSAPP`);
+// 🎨 FUNÇÕES DE FORMATAÇÃO
+function formatarDataHora(data) {
+  const hoje = new Date();
+  const amanha = new Date(hoje);
+  amanha.setDate(amanha.getDate() + 1);
   
+  if (data.toDateString() === hoje.toDateString()) {
+    return `hoje às ${data.getHours().toString().padStart(2, '0')}:${data.getMinutes().toString().padStart(2, '0')}h`;
+  } else if (data.toDateString() === amanha.toDateString()) {
+    return `amanhã às ${data.getHours().toString().padStart(2, '0')}:${data.getMinutes().toString().padStart(2, '0')}h`;
+  } else {
+    const dias = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+    return `${dias[data.getDay()]} às ${data.getHours().toString().padStart(2, '0')}:${data.getMinutes().toString().padStart(2, '0')}h`;
+  }
+}
+
+function formatarHora(data) {
+  return `${data.getHours().toString().padStart(2, '0')}:${data.getMinutes().toString().padStart(2, '0')}h`;
+}
+
+function formatarDiaSemana(dia) {
+  const dias = {
+    'segunda': 'segunda-feira',
+    'terça': 'terça-feira',
+    'terca': 'terça-feira',
+    'quarta': 'quarta-feira',
+    'quinta': 'quinta-feira',
+    'sexta': 'sexta-feira',
+    'sábado': 'sábado',
+    'sabado': 'sábado',
+    'domingo': 'domingo'
+  };
+  
+  return dias[dia] || dia;
+}
+
+// 📤 FUNÇÕES DE ENVIO DE MENSAGENS
+async function sendWhatsAppMessage(to, templateName) {
   const accessToken = process.env.META_ACCESS_TOKEN;
   const phoneNumberId = process.env.META_PHONE_NUMBER_ID;
   
@@ -416,7 +623,7 @@ async function sendWhatsAppMessage(to, templateName) {
       return { success: false, error: result.error };
     }
     
-    console.log('✅ Mensagem enviada com sucesso!');
+    console.log('✅ Mensagem enviada!');
     return { success: true };
     
   } catch (error) {
@@ -426,8 +633,6 @@ async function sendWhatsAppMessage(to, templateName) {
 }
 
 async function sendTextMessage(to, text) {
-  console.log(`\n📝 ENVIANDO MENSAGEM DE TEXTO`);
-  
   const accessToken = process.env.META_ACCESS_TOKEN;
   const phoneNumberId = process.env.META_PHONE_NUMBER_ID;
   
@@ -463,9 +668,7 @@ async function sendTextMessage(to, text) {
     if (result.error) {
       console.error('❌ Erro na API:', result.error.message);
       
-      // Tentar com template se der erro
       if (result.error.code === 131051 || result.error.code === 132000) {
-        console.log('🔄 Tentando enviar com template hello_world...');
         return await sendWhatsAppMessage(to, 'hello_world');
       }
       
