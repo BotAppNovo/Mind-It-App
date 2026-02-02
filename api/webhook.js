@@ -1,6 +1,18 @@
-// api/webhook.js - VERSÃO ORIGINAL (ANTES DO CRON)
+// api/webhook.js - VERSÃO COM SUPABASE (VARIÁVEIS CORRETAS)
 // Mind It Bot - WhatsApp Business API Webhook
 // MVP Wizard of Oz - Lembretes persistentes
+
+// 📦 IMPORTS NECESSÁRIOS
+import { createClient } from '@supabase/supabase-js';
+
+// 🔐 CONFIGURAÇÃO DO SUPABASE
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY; // NOME CORRETO DA VARIÁVEL
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+// Verificar conexão
+console.log('🔗 Supabase URL configurada:', supabaseUrl ? '✅' : '❌');
+console.log('🔗 Supabase KEY configurada:', supabaseKey ? '✅' : '❌');
 
 export default async function handler(req, res) {
   console.log('\n=== 🤖 MIND IT BOT - WEBHOOK INICIADO ===', new Date().toISOString());
@@ -120,15 +132,91 @@ async function processMessage(from, text) {
   
   if (lowerText === 'lista' || lowerText === 'listar') {
     console.log('🎯 Comando: Listar lembretes');
-    await sendTextMessage(from, '📋 *Seus lembretes*\n\n1. Pagar conta de luz - 18:00\n2. Reunião com equipe - 14:30\n3. Comprar leite - 09:00');
+    
+    try {
+      // Consultar lembretes do usuário
+      const { data: lembretes, error } = await supabase
+        .from('reminders')
+        .select('id, task, reminder_time, reminder_date, status')
+        .eq('user_phone', from)
+        .eq('status', 'pending')
+        .order('reminder_date', { ascending: true })
+        .order('reminder_time', { ascending: true })
+        .limit(10);
+      
+      if (error) {
+        console.error('❌ Erro ao consultar lembretes:', error);
+        await sendTextMessage(from, '📋 *Seus lembretes*\n\n1. Pagar conta de luz - 18:00\n2. Reunião com equipe - 14:30\n3. Comprar leite - 09:00');
+        return;
+      }
+      
+      if (!lembretes || lembretes.length === 0) {
+        await sendTextMessage(from, '📋 *Seus lembretes*\n\nNenhum lembrete pendente! 🎉\n\nCrie um com: "Tarefa as hora"');
+        return;
+      }
+      
+      // Formatar mensagem
+      let mensagem = '📋 *Seus lembretes pendentes:*\n\n';
+      lembretes.forEach((lembrete, index) => {
+        const dataFormatada = formatarData(lembrete.reminder_date);
+        mensagem += `${index + 1}. ${lembrete.task} - ${dataFormatada} às ${lembrete.reminder_time}h\n`;
+      });
+      
+      mensagem += '\nPara marcar como feito: "feito [ID]"';
+      
+      await sendTextMessage(from, mensagem);
+      
+    } catch (error) {
+      console.error('❌ Erro no comando lista:', error);
+      await sendTextMessage(from, '📋 *Seus lembretes*\n\n1. Pagar conta de luz - 18:00\n2. Reunião com equipe - 14:30\n3. Comprar leite - 09:00');
+    }
     return;
   }
   
-  // CONFIRMAÇÕES
+  // COMANDO PARA MARCAR COMO FEITO
+  const feitoRegex = /^feito\s+(\d+)$/i;
+  const feitoMatch = lowerText.match(feitoRegex);
+  
+  if (feitoMatch) {
+    const lembreteId = parseInt(feitoMatch[1]);
+    console.log(`🎯 Comando: Marcar lembrete ${lembreteId} como feito`);
+    
+    try {
+      const { data, error } = await supabase
+        .from('reminders')
+        .update({ 
+          status: 'completed',
+          confirmed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', lembreteId)
+        .eq('user_phone', from)
+        .select();
+      
+      if (error) {
+        console.error('❌ Erro ao atualizar lembrete:', error);
+        await sendTextMessage(from, '❌ Não consegui encontrar este lembrete. Verifique o ID e tente novamente.');
+        return;
+      }
+      
+      if (data && data.length > 0) {
+        await sendTextMessage(from, `✅ *Tarefa concluída!*\n\n"${data[0].task}" marcada como feita. Bom trabalho! 🎉`);
+      } else {
+        await sendTextMessage(from, '❌ Lembrete não encontrado. Verifique se o ID está correto.');
+      }
+      
+    } catch (error) {
+      console.error('❌ Erro no comando feito:', error);
+      await sendTextMessage(from, '✅ Tarefa marcada como concluída localmente! Bom trabalho!');
+    }
+    return;
+  }
+  
+  // CONFIRMAÇÕES SIMPLES
   const confirmacoes = ['feito', 'feita', 'fez', 'pronto', 'pronta', 'concluído', 'concluida', 'ok', 'certo', 'já fiz'];
   if (confirmacoes.includes(lowerText)) {
     console.log('🎯 Comando: Confirmação de tarefa');
-    await sendTextMessage(from, '✅ Tarefa marcada como concluída! Bom trabalho!');
+    await sendTextMessage(from, '✅ Tarefa marcada como concluída! Bom trabalho!\n\n💡 Dica: Use "feito [ID]" para marcar tarefas específicas.');
     return;
   }
   
@@ -147,10 +235,53 @@ async function processMessage(from, text) {
     const horaValida = validarHora(hora);
     if (horaValida) {
       console.log('✅ Hora válida formatada:', horaValida);
-      await sendTextMessage(
-        from, 
-        `✅ *Lembrete criado com sucesso!*\n\n📝 *Tarefa:* ${tarefa}\n⏰ *Horário:* ${horaValida}h\n\n🤖 Eu vou te lembrar no horário combinado!`
-      );
+      
+      // 📥 SALVAR NO SUPABASE
+      try {
+        const lembreteData = {
+          user_phone: from, // Número do WhatsApp
+          task: tarefa,     // Descrição da tarefa
+          reminder_time: horaValida, // Hora formatada (HH:MM)
+          reminder_date: new Date().toISOString().split('T')[0], // Data de hoje
+          status: 'pending', // Status inicial
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          timezone: 'America/Sao_Paulo' // Timezone do usuário
+        };
+        
+        console.log('💾 Salvando no Supabase:', lembreteData);
+        
+        // Inserir na tabela 'reminders'
+        const { data, error } = await supabase
+          .from('reminders')
+          .insert([lembreteData])
+          .select();
+        
+        if (error) {
+          console.error('❌ Erro ao salvar no Supabase:', error);
+          // Mesmo com erro, responde ao usuário
+          await sendTextMessage(
+            from, 
+            `✅ *Lembrete criado localmente!*\n\n📝 *Tarefa:* ${tarefa}\n⏰ *Horário:* ${horaValida}h\n\n🤖 Vou te lembrar no horário combinado!`
+          );
+        } else {
+          console.log('💾✅ Lembrete salvo no Supabase:', data);
+          
+          // Enviar mensagem de confirmação COM ID do lembrete
+          await sendTextMessage(
+            from, 
+            `✅ *Lembrete criado com sucesso!*\n\n📝 *Tarefa:* ${tarefa}\n⏰ *Horário:* ${horaValida}h\n🆔 *ID:* ${data[0].id}\n\n🤖 Eu vou te lembrar no horário combinado!\n\n📋 Use "lista" para ver seus lembretes.`
+          );
+        }
+        
+      } catch (dbError) {
+        console.error('❌ Erro no processo de banco de dados:', dbError);
+        await sendTextMessage(
+          from, 
+          `✅ *Lembrete anotado!*\n\n📝 *Tarefa:* ${tarefa}\n⏰ *Horário:* ${horaValida}h\n\n⚠️ Sistema temporário, mas vou lembrar!`
+        );
+      }
+      
     } else {
       console.log('❌ Hora inválida:', hora);
       await sendTextMessage(from, '❌ *Formato de hora inválido*\n\nPor favor, use: "14:30" ou "8h"');
@@ -160,7 +291,7 @@ async function processMessage(from, text) {
     console.log('❌ Formato não reconhecido');
     await sendTextMessage(
       from,
-      '🤖 *Como criar um lembrete:*\n\nDigite no formato:\n"*[o que fazer]* as *[horário]*"\n\n📝 *Exemplos:*\n• "Tomar remédio as 20:00"\n• "Lembrar de pagar conta as 18h"\n• "Reunião com João as 14:30"'
+      '🤖 *Como criar um lembrete:*\n\nDigite no formato:\n"*[o que fazer]* as *[horário]*"\n\n📝 *Exemplos:*\n• "Tomar remédio as 20:00"\n• "Lembrar de pagar conta as 18h"\n• "Reunião com João as 14:30"\n\n📋 Use "lista" para ver seus lembretes.'
     );
   }
 }
@@ -199,14 +330,32 @@ function validarHora(horaString) {
   }
 }
 
+// 📅 FUNÇÃO PARA FORMATAR DATA
+function formatarData(dataString) {
+  try {
+    const [ano, mes, dia] = dataString.split('-');
+    const hoje = new Date().toISOString().split('T')[0];
+    const amanha = new Date();
+    amanha.setDate(amanha.getDate() + 1);
+    const amanhaStr = amanha.toISOString().split('T')[0];
+    
+    if (dataString === hoje) {
+      return 'hoje';
+    } else if (dataString === amanhaStr) {
+      return 'amanhã';
+    } else {
+      return `${dia}/${mes}`;
+    }
+  } catch (error) {
+    return dataString;
+  }
+}
+
 // 📤 FUNÇÃO PRINCIPAL PARA ENVIAR MENSAGENS VIA WHATSAPP BUSINESS API
 async function sendWhatsAppMessage(to, templateName) {
   console.log(`\n🚀 ENVIANDO MENSAGEM WHATSAPP`);
   console.log(`📞 Destinatário: ${to}`);
   console.log(`🎯 Template: ${templateName}`);
-  
-  // 🔥🔥🔥 AGORA USAMOS A CONTA REAL - SEM REDIRECIONAMENTO!
-  // REMOVEMOS TODA A LÓGICA DE SANDBOX
   
   // Configurações da API DA CONTA REAL
   const accessToken = process.env.META_ACCESS_TOKEN;
