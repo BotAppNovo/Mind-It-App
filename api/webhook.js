@@ -1,4 +1,4 @@
-// api/webhook.js - VERSÃO FINAL PARA SANDBOX RESTRITO
+// api/webhook.js - VERSÃO PARA CONTA REAL MIND IT APP
 // Mind It Bot - WhatsApp Business API Webhook
 // MVP Wizard of Oz - Lembretes persistentes
 
@@ -106,7 +106,7 @@ async function processMessage(from, text) {
   const lowerText = text.toLowerCase().trim();
   
   // COMANDOS ESPECIAIS
-  if (lowerText === 'oi' || lowerText === 'olá' || lowerText === 'ola') {
+  if (lowerText === 'oi' || lowerText === 'olá' || lowerText === 'ola' || lowerText === 'hello') {
     console.log('🎯 Comando: Saudação inicial');
     await sendWhatsAppMessage(from, 'hello_world');
     return;
@@ -114,13 +114,13 @@ async function processMessage(from, text) {
   
   if (lowerText === 'ajuda' || lowerText === 'help') {
     console.log('🎯 Comando: Ajuda');
-    await sendWhatsAppMessage(from, 'hello_world');
+    await sendTextMessage(from, '🤖 *Mind It Bot - Ajuda*\n\nPara criar um lembrete, digite:\n"*[tarefa]* as *[hora]*"\n\nExemplo: "Lembrar de pagar conta amanhã as 18:00"');
     return;
   }
   
   if (lowerText === 'lista' || lowerText === 'listar') {
     console.log('🎯 Comando: Listar lembretes');
-    await sendWhatsAppMessage(from, 'hello_world');
+    await sendTextMessage(from, '📋 *Seus lembretes*\n\n1. Pagar conta de luz - 18:00\n2. Reunião com equipe - 14:30\n3. Comprar leite - 09:00');
     return;
   }
   
@@ -128,7 +128,7 @@ async function processMessage(from, text) {
   const confirmacoes = ['feito', 'feita', 'fez', 'pronto', 'pronta', 'concluído', 'concluida', 'ok', 'certo', 'já fiz'];
   if (confirmacoes.includes(lowerText)) {
     console.log('🎯 Comando: Confirmação de tarefa');
-    await sendWhatsAppMessage(from, 'hello_world');
+    await sendTextMessage(from, '✅ Tarefa marcada como concluída! Bom trabalho!');
     return;
   }
   
@@ -147,15 +147,21 @@ async function processMessage(from, text) {
     const horaValida = validarHora(hora);
     if (horaValida) {
       console.log('✅ Hora válida formatada:', horaValida);
-      await sendWhatsAppMessage(from, 'hello_world');
+      await sendTextMessage(
+        from, 
+        `✅ *Lembrete criado com sucesso!*\n\n📝 *Tarefa:* ${tarefa}\n⏰ *Horário:* ${horaValida}h\n\n🤖 Eu vou te lembrar no horário combinado!`
+      );
     } else {
       console.log('❌ Hora inválida:', hora);
-      await sendWhatsAppMessage(from, 'hello_world');
+      await sendTextMessage(from, '❌ *Formato de hora inválido*\n\nPor favor, use: "14:30" ou "8h"');
     }
     
   } else {
     console.log('❌ Formato não reconhecido');
-    await sendWhatsAppMessage(from, 'hello_world');
+    await sendTextMessage(
+      from,
+      '🤖 *Como criar um lembrete:*\n\nDigite no formato:\n"*[o que fazer]* as *[horário]*"\n\n📝 *Exemplos:*\n• "Tomar remédio as 20:00"\n• "Lembrar de pagar conta as 18h"\n• "Reunião com João as 14:30"'
+    );
   }
 }
 
@@ -193,56 +199,42 @@ function validarHora(horaString) {
   }
 }
 
-// 📤 FUNÇÃO PARA ENVIAR MENSAGENS VIA WHATSAPP BUSINESS API
-async function sendWhatsAppMessage(originalTo, templateName) {
+// 📤 FUNÇÃO PRINCIPAL PARA ENVIAR MENSAGENS VIA WHATSAPP BUSINESS API
+async function sendWhatsAppMessage(to, templateName) {
   console.log(`\n🚀 ENVIANDO MENSAGEM WHATSAPP`);
-  console.log(`📞 Destinatário original: ${originalTo}`);
+  console.log(`📞 Destinatário: ${to}`);
   console.log(`🎯 Template: ${templateName}`);
   
-  // 🔥🔥🔥 SOLUÇÃO FINAL - SANDBOX RESTRITO
-  // Alguns sandboxes do Meta só permitem enviar para si mesmos
-  let to = originalTo;
-  const isSandbox = true;
+  // 🔥🔥🔥 AGORA USAMOS A CONTA REAL - SEM REDIRECIONAMENTO!
+  // REMOVEMOS TODA A LÓGICA DE SANDBOX
   
-  if (isSandbox) {
-    console.log('🎯 AMBIENTE SANDBOX DETECTADO');
-    
-    // 🚨 SANDBOX ULTRA-RESTRITO: Só pode enviar para o próprio número
-    // O número do SEU bot (encontrado no metadata do webhook)
-    const botOwnNumber = '15551749162'; // Número DO SEU BOT
-    
-    console.log(`⚠️  Sandbox restrito: só pode enviar para o próprio bot`);
-    console.log(`📞 Redirecionando ${originalTo} → ${botOwnNumber}`);
-    
-    to = botOwnNumber;
-  }
-  
-  // Configurações da API
+  // Configurações da API DA CONTA REAL
   const accessToken = process.env.META_ACCESS_TOKEN;
   const phoneNumberId = process.env.META_PHONE_NUMBER_ID;
   
-  console.log('=== CONFIGURAÇÕES ===');
+  console.log('=== CONFIGURAÇÕES DA CONTA REAL ===');
   console.log('Token:', accessToken ? '✅ Configurado' : '❌ Faltando');
   console.log('Phone ID:', phoneNumberId || 'Não encontrado');
-  console.log('Destinatário final:', to);
-  console.log('=====================');
+  console.log('Nome da conta: Mind It App');
+  console.log('Número: +55 81 98598-0592');
+  console.log('====================================');
   
   if (!accessToken || !phoneNumberId) {
     console.error('❌ Variáveis de ambiente não configuradas!');
     return { error: 'Configuração incompleta' };
   }
   
-  // URL da API
-  const url = `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`;
+  // URL da API - CONTA REAL
+  const url = `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`;
   
-  // Payload SIMPLES e CORRETO
+  // Payload - CONTA REAL
   const payload = {
     messaging_product: 'whatsapp',
     to: to,
     type: 'template',
     template: {
       name: templateName,
-      language: { code: 'en_US' }
+      language: { code: 'pt_BR' }  // Alterado para português
     }
   };
   
@@ -265,34 +257,85 @@ async function sendWhatsAppMessage(originalTo, templateName) {
     if (result.error) {
       console.error('❌ Erro na API:', result.error.message);
       console.error('Código:', result.error.code);
-      
-      // Análise detalhada do erro
-      if (result.error.code === 131030) {
-        console.error('\n🚨🚨🚨 ANÁLISE DO ERRO 131030 🚨🚨🚨');
-        console.error('PROBLEMA: Sandbox ultra-restrito do Meta.');
-        console.error('SEU SANDBOX não permite NENHUM envio, nem para si mesmo.');
-        console.error('\n💡 SOLUÇÕES DISPONÍVEIS:');
-        console.error('1. Migrar para conta REAL (Mind It App) - RECOMENDADO');
-        console.error('2. Usar Twilio WhatsApp Sandbox - Alternativa rápida');
-        console.error('3. Solicitar acesso avançado ao Meta - Demorado');
-        console.error('🚨🚨🚨 SEU BOT ESTÁ TECNICAMENTE PRONTO 🚨🚨🚨');
-        console.error('Webhook, parsing, lógica: 100% funcionais');
-        console.error('Problema é RESTRIÇÃO do ambiente, não do seu código.');
-      }
+      console.error('Tipo:', result.error.type);
       
       return { success: false, error: result.error };
     }
     
-    console.log('\n🎉🎉🎉 ✅✅✅ SUCESSO! ✅✅✅ 🎉🎉🎉');
-    console.log('Mensagem enviada com sucesso!');
+    console.log('\n🎉🎉🎉 ✅✅✅ MENSAGEM ENVIADA COM SUCESSO! ✅✅✅ 🎉🎉🎉');
     console.log('ID da mensagem:', result.messages?.[0]?.id);
-    console.log('\n💡 SEU BOT ESTÁ 100% FUNCIONAL!');
-    console.log('Quando migrar para conta real, funcionará perfeitamente.');
     
     return { success: true, messageId: result.messages?.[0]?.id };
     
   } catch (error) {
     console.error('❌ Erro na requisição:', error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+// 📝 FUNÇÃO PARA ENVIAR MENSAGENS DE TEXTO SIMPLES (SEM TEMPLATE)
+async function sendTextMessage(to, text) {
+  console.log(`\n📝 ENVIANDO MENSAGEM DE TEXTO`);
+  console.log(`📞 Destinatário: ${to}`);
+  console.log(`💬 Texto: ${text.substring(0, 50)}...`);
+  
+  // Configurações da API DA CONTA REAL
+  const accessToken = process.env.META_ACCESS_TOKEN;
+  const phoneNumberId = process.env.META_PHONE_NUMBER_ID;
+  
+  if (!accessToken || !phoneNumberId) {
+    console.error('❌ Variáveis de ambiente não configuradas!');
+    return { error: 'Configuração incompleta' };
+  }
+  
+  // URL da API - CONTA REAL
+  const url = `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`;
+  
+  // Payload para mensagem de texto
+  const payload = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: to,
+    type: 'text',
+    text: {
+      preview_url: false,
+      body: text
+    }
+  };
+  
+  console.log('📦 Payload (texto):', JSON.stringify(payload, null, 2));
+  
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload)
+    });
+    
+    const result = await response.json();
+    console.log('📤 Resposta da API (texto):', JSON.stringify(result, null, 2));
+    
+    if (result.error) {
+      console.error('❌ Erro na API (texto):', result.error.message);
+      console.error('Código:', result.error.code);
+      
+      // Se der erro com mensagem de texto, tenta com template
+      if (result.error.code === 131051 || result.error.code === 132000) {
+        console.log('🔄 Tentando enviar com template hello_world...');
+        return await sendWhatsAppMessage(to, 'hello_world');
+      }
+      
+      return { success: false, error: result.error };
+    }
+    
+    console.log('✅ Mensagem de texto enviada com sucesso!');
+    return { success: true, messageId: result.messages?.[0]?.id };
+    
+  } catch (error) {
+    console.error('❌ Erro na requisição (texto):', error.message);
     return { success: false, error: error.message };
   }
 }
